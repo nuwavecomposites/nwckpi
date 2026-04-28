@@ -1,86 +1,35 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
-import settingsRoutes from './routes/settings'
-import weeksRoutes from './routes/weeks'
-import overheadRoutes from './routes/overhead'
+import weeks from './routes/weeks'
+import overhead from './routes/overhead'
+import settings from './routes/settings'
 
 type Bindings = { DB: D1Database }
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-app.use('/api/*', cors())
+app.use('*', cors())
 
-// DB init middleware — ensures tables exist on cold start
+// API routes
+app.route('/api/weeks', weeks)
+app.route('/api/overhead', overhead)
+app.route('/api/settings', settings)
+
+// DB init — ensures tables exist on first request
 app.use('/api/*', async (c, next) => {
-  await c.env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS settings (
-      id INTEGER PRIMARY KEY DEFAULT 1,
-      business_name TEXT NOT NULL DEFAULT 'NuWave Composites',
-      payroll_tax_pct REAL NOT NULL DEFAULT 7.65,
-      workers_comp_pct REAL NOT NULL DEFAULT 4.00,
-      fl_reemployment_pct REAL NOT NULL DEFAULT 0.50,
-      other_burden_pct REAL NOT NULL DEFAULT 0.00,
-      nr_labor_target REAL NOT NULL DEFAULT 2.0,
-      gp_pct_target REAL NOT NULL DEFAULT 40.0,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `).run()
-  await c.env.DB.prepare(`INSERT OR IGNORE INTO settings (id) VALUES (1)`).run()
-  await c.env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS weekly_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      week_start DATE NOT NULL UNIQUE,
-      notes TEXT,
-      gross_revenue REAL NOT NULL DEFAULT 0,
-      cogs REAL NOT NULL DEFAULT 0,
-      direct_labor_wages REAL NOT NULL DEFAULT 0,
-      direct_labor_hours REAL NOT NULL DEFAULT 0,
-      indirect_labor_wages REAL NOT NULL DEFAULT 0,
-      indirect_labor_hours REAL NOT NULL DEFAULT 0,
-      labor_burden REAL NOT NULL DEFAULT 0,
-      additional_benefits REAL NOT NULL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `).run()
-  await c.env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS overhead_fixed (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      amount REAL NOT NULL DEFAULT 0,
-      active INTEGER NOT NULL DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `).run()
-  await c.env.DB.prepare(`
-    CREATE TABLE IF NOT EXISTS overhead_onetime (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      month TEXT NOT NULL,
-      name TEXT NOT NULL,
-      amount REAL NOT NULL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `).run()
   await next()
 })
 
-// API routes
-app.route('/api/settings', settingsRoutes)
-app.route('/api/weeks', weeksRoutes)
-app.route('/api/overhead', overheadRoutes)
-
-// Static assets
+// Static files
 app.use('/static/*', serveStatic({ root: './' }))
 
-// SPA fallback — serve index.html for all non-API routes
+// Serve the SPA for all non-API routes
 app.get('*', async (c) => {
-  // In Cloudflare Pages, index.html in public/ is served automatically
-  // For the worker we return it directly
   return c.html(getHTML())
 })
 
-function getHTML(): string {
+function getHTML() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -89,1618 +38,1237 @@ function getHTML(): string {
   <title>NuWave Composites KPI Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
-    /* ===== CSS RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { font-size: 16px; }
-    body {
-      font-family: 'Inter', sans-serif;
-      background: #f0f2f5;
-      color: #1a1d23;
-      min-height: 100vh;
-      display: flex;
+    :root {
+      --accent: #4f6ef7;
+      --accent-light: #eef0fe;
+      --accent-dark: #3a55d4;
+      --green: #22c55e;
+      --green-bg: #f0fdf4;
+      --yellow: #eab308;
+      --yellow-bg: #fefce8;
+      --red: #ef4444;
+      --red-bg: #fef2f2;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+      --sidebar-w: 240px;
+      --sidebar-w-collapsed: 64px;
     }
+    body { font-family: 'Inter', sans-serif; background: var(--gray-50); color: var(--gray-800); min-height: 100vh; }
 
-    /* ===== SIDEBAR ===== */
-    #sidebar {
-      width: 240px;
-      min-height: 100vh;
-      background: #1a1d23;
-      display: flex;
-      flex-direction: column;
-      position: fixed;
-      left: 0; top: 0; bottom: 0;
-      z-index: 100;
-      transition: transform 0.3s ease;
+    /* ── LAYOUT ── */
+    .app-shell { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: var(--sidebar-w); background: var(--gray-900); color: #fff;
+      display: flex; flex-direction: column; position: fixed; top: 0; left: 0;
+      height: 100vh; z-index: 100; transition: width .25s ease;
     }
-    #sidebar .brand {
-      padding: 24px 20px 20px;
-      border-bottom: 1px solid #2d3139;
+    .sidebar-brand {
+      padding: 20px 16px 16px; border-bottom: 1px solid rgba(255,255,255,.08);
     }
-    #sidebar .brand h1 {
-      font-size: 15px;
-      font-weight: 700;
-      color: #fff;
-      line-height: 1.3;
+    .sidebar-brand .brand-name {
+      font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: .04em;
+      text-transform: uppercase; line-height: 1.3;
     }
-    #sidebar .brand span {
-      font-size: 11px;
-      color: #6b7280;
-      font-weight: 400;
-      display: block;
-      margin-top: 2px;
+    .sidebar-brand .brand-sub { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+    .sidebar-nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+    .nav-item {
+      display: flex; align-items: center; gap: 12px; padding: 11px 16px;
+      cursor: pointer; border-radius: 0; transition: background .15s;
+      font-size: 14px; font-weight: 500; color: var(--gray-300);
+      border-left: 3px solid transparent; text-decoration: none;
     }
-    #sidebar nav {
-      flex: 1;
-      padding: 12px 0;
+    .nav-item:hover { background: rgba(255,255,255,.06); color: #fff; }
+    .nav-item.active { background: rgba(79,110,247,.15); color: var(--accent); border-left-color: var(--accent); }
+    .nav-item i { width: 18px; text-align: center; font-size: 15px; }
+    .main-content { margin-left: var(--sidebar-w); flex: 1; min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar {
+      background: #fff; border-bottom: 1px solid var(--gray-200);
+      padding: 0 24px; height: 60px; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 50;
     }
-    #sidebar nav a {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 20px;
-      color: #9ca3af;
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 500;
-      border-radius: 0;
-      transition: all 0.15s;
-      cursor: pointer;
-      border-left: 3px solid transparent;
-    }
-    #sidebar nav a:hover { background: #22262e; color: #e5e7eb; }
-    #sidebar nav a.active {
-      background: #22262e;
-      color: #4f6ef7;
-      border-left-color: #4f6ef7;
-    }
-    #sidebar nav a i { width: 18px; text-align: center; font-size: 15px; }
-    #sidebar .sidebar-footer {
-      padding: 16px 20px;
-      border-top: 1px solid #2d3139;
-      font-size: 12px;
-      color: #4b5563;
-    }
+    .topbar-title { font-size: 18px; font-weight: 700; color: var(--gray-900); }
+    .topbar-sub { font-size: 12px; color: var(--gray-400); margin-top: 1px; }
+    .page-body { padding: 24px; flex: 1; }
 
-    /* ===== MAIN CONTENT ===== */
-    #main {
-      margin-left: 240px;
-      flex: 1;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-    #topbar {
-      background: #fff;
-      border-bottom: 1px solid #e5e7eb;
-      padding: 0 28px;
-      height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      position: sticky;
-      top: 0;
-      z-index: 50;
-    }
-    #topbar h2 { font-size: 18px; font-weight: 700; color: #111827; }
-    #topbar .topbar-right { display: flex; align-items: center; gap: 12px; }
-    #mobile-menu-btn {
-      display: none;
-      background: none;
-      border: none;
-      font-size: 20px;
-      color: #374151;
-      cursor: pointer;
-    }
-
-    #content { padding: 28px; flex: 1; }
-
-    /* ===== VIEWS ===== */
-    .view { display: none; }
-    .view.active { display: block; }
-
-    /* ===== KPI CARDS ===== */
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-    .kpi-card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 20px;
-      border: 1px solid #e5e7eb;
-      position: relative;
-      overflow: hidden;
-    }
-    .kpi-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: #e5e7eb;
-    }
-    .kpi-card.green::before { background: #10b981; }
-    .kpi-card.yellow::before { background: #f59e0b; }
-    .kpi-card.red::before { background: #ef4444; }
-    .kpi-card.blue::before { background: #4f6ef7; }
-    .kpi-card .label {
-      font-size: 11px;
-      font-weight: 600;
-      color: #9ca3af;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 8px;
-    }
-    .kpi-card .value {
-      font-size: 26px;
-      font-weight: 800;
-      color: #111827;
-      line-height: 1.1;
-    }
-    .kpi-card .sub {
-      font-size: 12px;
-      color: #6b7280;
-      margin-top: 4px;
-    }
-    .kpi-card .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 999px;
-      margin-top: 8px;
-    }
-    .badge.green { background: #d1fae5; color: #065f46; }
-    .badge.yellow { background: #fef3c7; color: #92400e; }
-    .badge.red { background: #fee2e2; color: #991b1b; }
-    .badge.blue { background: #dbeafe; color: #1d4ed8; }
-
-    /* ===== WEEK PILLS ===== */
-    .week-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 20px;
-    }
-    .week-pill {
-      padding: 6px 14px;
-      border-radius: 999px;
-      border: 1.5px solid #e5e7eb;
-      background: #fff;
-      font-size: 13px;
-      font-weight: 500;
-      color: #6b7280;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .week-pill:hover { border-color: #4f6ef7; color: #4f6ef7; }
-    .week-pill.active {
-      background: #4f6ef7;
-      border-color: #4f6ef7;
-      color: #fff;
-    }
-
-    /* ===== CHARTS ===== */
-    .charts-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-top: 24px;
-    }
-    .chart-card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 20px;
-      border: 1px solid #e5e7eb;
-    }
-    .chart-card h3 {
-      font-size: 13px;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 16px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .chart-card canvas { max-height: 220px; }
-
-    /* ===== FORMS ===== */
+    /* ── CARDS ── */
     .card {
-      background: #fff;
-      border-radius: 12px;
-      border: 1px solid #e5e7eb;
-      padding: 24px;
-      margin-bottom: 20px;
+      background: #fff; border-radius: 12px; border: 1px solid var(--gray-200);
+      box-shadow: 0 1px 4px rgba(0,0,0,.04);
     }
-    .card h3 {
-      font-size: 15px;
-      font-weight: 700;
-      color: #111827;
-      margin-bottom: 18px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .card-header {
+      padding: 16px 20px 12px; border-bottom: 1px solid var(--gray-100);
+      display: flex; align-items: center; justify-content: space-between;
     }
-    .card h3 i { color: #4f6ef7; }
-    .form-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 16px;
+    .card-title { font-size: 14px; font-weight: 600; color: var(--gray-700); }
+    .card-body { padding: 20px; }
+
+    /* ── KPI CARDS ── */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi-card {
+      background: #fff; border-radius: 12px; border: 1px solid var(--gray-200);
+      padding: 16px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04);
     }
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+    .kpi-card.green { border-left: 4px solid var(--green); }
+    .kpi-card.yellow { border-left: 4px solid var(--yellow); }
+    .kpi-card.red { border-left: 4px solid var(--red); }
+    .kpi-card.neutral { border-left: 4px solid var(--accent); }
+    .kpi-label { font-size: 11px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .kpi-value { font-size: 26px; font-weight: 700; color: var(--gray-900); line-height: 1; }
+    .kpi-sub { font-size: 12px; color: var(--gray-400); margin-top: 4px; }
+    .kpi-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; margin-top: 6px; }
+    .kpi-badge.green { background: var(--green-bg); color: #16a34a; }
+    .kpi-badge.yellow { background: var(--yellow-bg); color: #a16207; }
+    .kpi-badge.red { background: var(--red-bg); color: #dc2626; }
+
+    /* ── WEEK PILLS ── */
+    .week-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+    .week-pill {
+      padding: 6px 14px; border-radius: 99px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: 1.5px solid var(--gray-200); background: #fff;
+      color: var(--gray-600); transition: all .15s;
     }
+    .week-pill:hover { border-color: var(--accent); color: var(--accent); }
+    .week-pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* ── CHARTS ── */
+    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+    .chart-wrap { position: relative; height: 220px; }
+
+    /* ── FORMS ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group.full { grid-column: 1 / -1; }
-    .form-group label {
-      font-size: 12px;
-      font-weight: 600;
-      color: #374151;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .form-group input,
-    .form-group textarea,
-    .form-group select {
-      padding: 9px 12px;
-      border: 1.5px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      color: #111827;
-      background: #fff;
-      transition: border-color 0.15s;
+    label { font-size: 12px; font-weight: 600; color: var(--gray-600); }
+    input[type=text], input[type=number], input[type=date], textarea, select {
+      width: 100%; padding: 9px 12px; border: 1.5px solid var(--gray-200);
+      border-radius: 8px; font-size: 14px; font-family: inherit;
+      color: var(--gray-800); background: #fff; transition: border-color .15s;
       outline: none;
     }
-    .form-group input:focus,
-    .form-group textarea:focus,
-    .form-group select:focus {
-      border-color: #4f6ef7;
-      box-shadow: 0 0 0 3px rgba(79,110,247,0.1);
-    }
-    .form-group textarea { resize: vertical; min-height: 72px; }
-    .form-divider {
-      grid-column: 1 / -1;
-      height: 1px;
-      background: #f3f4f6;
-      margin: 4px 0;
-    }
-    .form-section-label {
-      grid-column: 1 / -1;
-      font-size: 11px;
-      font-weight: 700;
-      color: #9ca3af;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      padding-top: 4px;
-    }
-    .calculated-field {
-      padding: 9px 12px;
-      border: 1.5px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-      background: #f9fafb;
-      color: #374151;
-      font-weight: 600;
-    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,110,247,.1); }
+    textarea { resize: vertical; min-height: 80px; }
+    .input-prefix { position: relative; }
+    .input-prefix span { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--gray-400); font-size: 14px; pointer-events: none; }
+    .input-prefix input { padding-left: 24px; }
+    .input-suffix { position: relative; }
+    .input-suffix span { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--gray-400); font-size: 14px; pointer-events: none; }
+    .input-suffix input { padding-right: 28px; }
 
-    /* ===== LIVE KPI PREVIEW ===== */
-    #kpi-preview {
-      background: linear-gradient(135deg, #1a1d23 0%, #22262e 100%);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    #kpi-preview h3 {
-      color: #9ca3af;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 16px;
-    }
-    .preview-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-      gap: 12px;
-    }
-    .preview-item .plabel {
-      font-size: 10px;
-      color: #6b7280;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 4px;
-    }
-    .preview-item .pvalue {
-      font-size: 20px;
-      font-weight: 800;
-      color: #fff;
-    }
-    .preview-item .pvalue.green { color: #34d399; }
-    .preview-item .pvalue.yellow { color: #fbbf24; }
-    .preview-item .pvalue.red { color: #f87171; }
-
-    /* ===== BUTTONS ===== */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 18px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      border: none;
-      transition: all 0.15s;
-    }
-    .btn-primary {
-      background: #4f6ef7;
-      color: #fff;
-    }
-    .btn-primary:hover { background: #3b5ae8; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,110,247,0.3); }
-    .btn-secondary {
-      background: #f3f4f6;
-      color: #374151;
-    }
-    .btn-secondary:hover { background: #e5e7eb; }
-    .btn-danger {
-      background: #fee2e2;
-      color: #dc2626;
-    }
-    .btn-danger:hover { background: #fecaca; }
+    /* ── BUTTONS ── */
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; font-family: inherit; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-secondary { background: var(--gray-100); color: var(--gray-700); }
+    .btn-secondary:hover { background: var(--gray-200); }
+    .btn-danger { background: var(--red-bg); color: var(--red); border: 1px solid #fecaca; }
+    .btn-danger:hover { background: #fee2e2; }
     .btn-sm { padding: 5px 12px; font-size: 12px; }
-    .btn-icon {
-      width: 32px; height: 32px;
-      padding: 0;
-      justify-content: center;
-      border-radius: 6px;
-    }
-    .btn-success { background: #d1fae5; color: #065f46; }
-    .btn-success:hover { background: #a7f3d0; }
+    .btn-icon { padding: 7px; border-radius: 8px; background: var(--gray-100); color: var(--gray-500); border: none; cursor: pointer; transition: all .15s; font-size: 13px; }
+    .btn-icon:hover { background: var(--gray-200); color: var(--gray-700); }
+    .btn-icon.danger:hover { background: var(--red-bg); color: var(--red); }
 
-    /* ===== TABLES ===== */
-    .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid #e5e7eb; }
+    /* ── LIVE KPI PREVIEW ── */
+    .kpi-preview {
+      background: var(--accent-light); border: 1.5px solid rgba(79,110,247,.2);
+      border-radius: 12px; padding: 16px 20px; margin-top: 20px;
+    }
+    .kpi-preview h4 { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; }
+    .kpi-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .kpi-prev-item .label { font-size: 10px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: .05em; }
+    .kpi-prev-item .val { font-size: 16px; font-weight: 700; color: var(--gray-900); margin-top: 2px; }
+    .kpi-prev-item .val.green { color: var(--green); }
+    .kpi-prev-item .val.yellow { color: var(--yellow); }
+    .kpi-prev-item .val.red { color: var(--red); }
+
+    /* ── TABLE ── */
+    .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    thead { background: #f9fafb; }
-    th {
-      padding: 10px 16px;
-      text-align: left;
-      font-size: 11px;
-      font-weight: 700;
-      color: #6b7280;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    td {
-      padding: 12px 16px;
-      border-bottom: 1px solid #f3f4f6;
-      color: #374151;
-      vertical-align: middle;
-    }
+    th { background: var(--gray-50); padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700; color: var(--gray-500); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--gray-200); white-space: nowrap; }
+    td { padding: 11px 14px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
-    tr:hover td { background: #f9fafb; }
+    tr:hover td { background: var(--gray-50); }
+    .td-actions { display: flex; gap: 6px; align-items: center; }
 
-    /* ===== OVERHEAD ===== */
-    .oh-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    /* ── SEARCH ── */
+    .search-wrap { position: relative; }
+    .search-wrap i { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--gray-400); font-size: 13px; }
+    .search-wrap input { padding-left: 34px; }
 
-    /* ===== HISTORY SEARCH ===== */
-    .search-bar {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 16px;
-      align-items: center;
-    }
-    .search-bar input {
-      flex: 1;
-      padding: 9px 14px;
-      border: 1.5px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      outline: none;
-    }
-    .search-bar input:focus { border-color: #4f6ef7; }
+    /* ── SECTION HEADING ── */
+    .section-title { font-size: 15px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+    .section-sub { font-size: 12px; color: var(--gray-400); margin-bottom: 20px; }
 
-    /* ===== SETTINGS ===== */
-    .settings-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 16px;
-    }
+    /* ── DIVIDER ── */
+    .divider { border: none; border-top: 1px solid var(--gray-100); margin: 20px 0; }
 
-    /* ===== TOAST ===== */
-    #toast {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      background: #111827;
-      color: #fff;
-      padding: 12px 20px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 500;
-      opacity: 0;
-      transform: translateY(10px);
-      transition: all 0.3s;
-      z-index: 9999;
-      pointer-events: none;
-    }
-    #toast.show { opacity: 1; transform: translateY(0); }
-    #toast.success { background: #065f46; }
-    #toast.error { background: #991b1b; }
+    /* ── BADGE ── */
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+    .badge-green { background: var(--green-bg); color: #16a34a; }
+    .badge-yellow { background: var(--yellow-bg); color: #a16207; }
+    .badge-red { background: var(--red-bg); color: #dc2626; }
+    .badge-blue { background: var(--accent-light); color: var(--accent); }
 
-    /* ===== MODAL ===== */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 200;
-      display: none;
-      align-items: center;
-      justify-content: center;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal {
-      background: #fff;
-      border-radius: 14px;
-      padding: 28px;
-      width: 90%;
-      max-width: 560px;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
-    .modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-    }
-    .modal-header h3 { font-size: 16px; font-weight: 700; }
-    .modal-header button {
-      background: none;
-      border: none;
-      font-size: 18px;
-      color: #9ca3af;
-      cursor: pointer;
-    }
+    /* ── MODAL ── */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal { background: #fff; border-radius: 16px; width: 100%; max-width: 620px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
+    .modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; justify-content: space-between; }
+    .modal-title { font-size: 16px; font-weight: 700; }
+    .modal-body { padding: 24px; }
+    .modal-footer { padding: 16px 24px; border-top: 1px solid var(--gray-100); display: flex; justify-content: flex-end; gap: 10px; }
+    .hidden { display: none !important; }
 
-    /* ===== EMPTY STATE ===== */
-    .empty-state {
-      text-align: center;
-      padding: 48px 20px;
-      color: #9ca3af;
-    }
+    /* ── TOAST ── */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 300; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--gray-900); color: #fff; padding: 12px 18px; border-radius: 10px; font-size: 13px; font-weight: 500; box-shadow: 0 4px 20px rgba(0,0,0,.2); display: flex; align-items: center; gap: 10px; animation: slideUp .25s ease; }
+    .toast.success { border-left: 4px solid var(--green); }
+    .toast.error { border-left: 4px solid var(--red); }
+    @keyframes slideUp { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
+
+    /* ── EMPTY STATE ── */
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--gray-400); }
     .empty-state i { font-size: 40px; margin-bottom: 12px; display: block; }
     .empty-state p { font-size: 14px; }
 
-    /* ===== SIDEBAR OVERLAY (mobile) ===== */
-    #sidebar-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 99;
-    }
+    /* ── SETTINGS ── */
+    .settings-section { margin-bottom: 32px; }
+    .settings-section-title { font-size: 13px; font-weight: 700; color: var(--gray-700); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--gray-100); }
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 
-    /* ===== RESPONSIVE ===== */
+    /* ── OVERHEAD TOGGLE ── */
+    .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .toggle-track { width: 36px; height: 20px; background: var(--gray-300); border-radius: 99px; position: relative; transition: background .15s; flex-shrink: 0; }
+    .toggle-thumb { width: 14px; height: 14px; background: #fff; border-radius: 50%; position: absolute; top: 3px; left: 3px; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+    .toggle.on .toggle-track { background: var(--accent); }
+    .toggle.on .toggle-thumb { transform: translateX(16px); }
+    .toggle-label { font-size: 13px; color: var(--gray-600); }
+
+    /* ── RESPONSIVE ── */
     @media (max-width: 768px) {
-      #sidebar {
-        transform: translateX(-240px);
-      }
-      #sidebar.open {
-        transform: translateX(0);
-      }
-      #sidebar-overlay.open { display: block; }
-      #main { margin-left: 0; }
-      #mobile-menu-btn { display: block; }
+      .sidebar { width: 64px; }
+      .sidebar-brand .brand-name, .sidebar-brand .brand-sub, .nav-item span { display: none; }
+      .main-content { margin-left: 64px; }
+      .form-grid { grid-template-columns: 1fr; }
       .charts-grid { grid-template-columns: 1fr; }
-      .oh-panels { grid-template-columns: 1fr; }
       .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-      #content { padding: 16px; }
+      .page-body { padding: 16px; }
+      .kpi-preview-grid { grid-template-columns: repeat(2, 1fr); }
     }
     @media (max-width: 480px) {
       .kpi-grid { grid-template-columns: 1fr 1fr; }
-      .kpi-card .value { font-size: 20px; }
     }
-
-    /* ===== LOADING ===== */
-    .spinner {
-      width: 36px; height: 36px;
-      border: 3px solid #e5e7eb;
-      border-top-color: #4f6ef7;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin: 40px auto;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-center { text-align: center; }
   </style>
 </head>
 <body>
-
-<!-- Sidebar overlay (mobile) -->
-<div id="sidebar-overlay"></div>
-
-<!-- Sidebar -->
-<aside id="sidebar">
-  <div class="brand">
-    <h1 id="sidebar-biz-name">NuWave Composites</h1>
-    <span>KPI Dashboard</span>
-  </div>
-  <nav>
-    <a data-view="dashboard" class="active">
-      <i class="fas fa-chart-line"></i> Dashboard
-    </a>
-    <a data-view="entry">
-      <i class="fas fa-edit"></i> Weekly Entry
-    </a>
-    <a data-view="overhead">
-      <i class="fas fa-building"></i> Overhead
-    </a>
-    <a data-view="history">
-      <i class="fas fa-history"></i> History
-    </a>
-    <a data-view="settings">
-      <i class="fas fa-cog"></i> Settings
-    </a>
+<div class="app-shell">
+  <!-- SIDEBAR -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-name">NuWave Composites</div>
+      <div class="brand-sub">KPI Dashboard</div>
+    </div>
+    <div class="sidebar-nav">
+      <a class="nav-item active" data-view="dashboard">
+        <i class="fas fa-chart-line"></i><span>Dashboard</span>
+      </a>
+      <a class="nav-item" data-view="entry">
+        <i class="fas fa-plus-circle"></i><span>Weekly Entry</span>
+      </a>
+      <a class="nav-item" data-view="overhead">
+        <i class="fas fa-building"></i><span>Overhead</span>
+      </a>
+      <a class="nav-item" data-view="history">
+        <i class="fas fa-history"></i><span>History</span>
+      </a>
+      <a class="nav-item" data-view="settings">
+        <i class="fas fa-cog"></i><span>Settings</span>
+      </a>
+    </div>
   </nav>
-  <div class="sidebar-footer">v1.0 &bull; Cloudflare D1</div>
-</aside>
 
-<!-- Main -->
-<div id="main">
-  <header id="topbar">
-    <div style="display:flex;align-items:center;gap:12px">
-      <button id="mobile-menu-btn"><i class="fas fa-bars"></i></button>
-      <h2 id="page-title">Dashboard</h2>
-    </div>
-    <div class="topbar-right">
-      <span id="topbar-week" style="font-size:13px;color:#6b7280;"></span>
-    </div>
-  </header>
-
-  <main id="content">
-
-    <!-- ========== DASHBOARD VIEW ========== -->
-    <div id="view-dashboard" class="view active">
-      <div class="week-pills" id="dash-week-pills"></div>
-      <div class="kpi-grid" id="dash-kpi-grid">
-        <div class="loading-center"><div class="spinner"></div></div>
+  <!-- MAIN -->
+  <div class="main-content">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title" id="topbar-title">Dashboard</div>
+        <div class="topbar-sub" id="topbar-sub">Overview of your KPIs</div>
       </div>
-      <div class="charts-grid">
-        <div class="chart-card">
-          <h3><i class="fas fa-chart-line" style="color:#4f6ef7;margin-right:6px"></i>NR / Labor Cost Trend</h3>
-          <canvas id="chart-nr-labor"></canvas>
-        </div>
-        <div class="chart-card">
-          <h3><i class="fas fa-chart-bar" style="color:#4f6ef7;margin-right:6px"></i>Net Revenue vs Gross Profit</h3>
-          <canvas id="chart-nr-gp"></canvas>
-        </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span id="business-name-display" style="font-size:13px;font-weight:600;color:var(--gray-400);"></span>
       </div>
     </div>
-
-    <!-- ========== WEEKLY ENTRY VIEW ========== -->
-    <div id="view-entry" class="view">
-      <!-- Live KPI Preview -->
-      <div id="kpi-preview">
-        <h3><i class="fas fa-bolt"></i> Live KPI Preview</h3>
-        <div class="preview-grid">
-          <div class="preview-item">
-            <div class="plabel">Net Revenue</div>
-            <div class="pvalue" id="prev-nr">$0</div>
-          </div>
-          <div class="preview-item">
-            <div class="plabel">NR / Labor</div>
-            <div class="pvalue" id="prev-nrlabor">0.00x</div>
-          </div>
-          <div class="preview-item">
-            <div class="plabel">Gross Profit</div>
-            <div class="pvalue" id="prev-gp">$0</div>
-          </div>
-          <div class="preview-item">
-            <div class="plabel">GP %</div>
-            <div class="pvalue" id="prev-gppct">0.0%</div>
-          </div>
-          <div class="preview-item">
-            <div class="plabel">Labor Cost</div>
-            <div class="pvalue" id="prev-labor">$0</div>
-          </div>
-          <div class="preview-item">
-            <div class="plabel">NR / Dir Hr</div>
-            <div class="pvalue" id="prev-nrhour">$0</div>
-          </div>
-        </div>
-      </div>
-
-      <form id="entry-form">
-        <input type="hidden" id="entry-id" value="" />
-        <div class="card">
-          <h3><i class="fas fa-calendar-week"></i> Week Info</h3>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Week Start Date *</label>
-              <input type="date" id="f-week-start" required />
-            </div>
-            <div class="form-group">
-              <label>Notes</label>
-              <input type="text" id="f-notes" placeholder="Optional notes for this week..." />
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3><i class="fas fa-dollar-sign"></i> Revenue & COGS</h3>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Gross Revenue ($)</label>
-              <input type="number" id="f-gross-revenue" step="0.01" min="0" placeholder="0.00" />
-            </div>
-            <div class="form-group">
-              <label>Cost of Goods Sold ($)</label>
-              <input type="number" id="f-cogs" step="0.01" min="0" placeholder="0.00" />
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3><i class="fas fa-users"></i> Labor</h3>
-          <div class="form-grid">
-            <div class="form-section-label">Direct Labor</div>
-            <div class="form-group">
-              <label>Direct Wages ($)</label>
-              <input type="number" id="f-dl-wages" step="0.01" min="0" placeholder="0.00" />
-            </div>
-            <div class="form-group">
-              <label>Direct Hours</label>
-              <input type="number" id="f-dl-hours" step="0.1" min="0" placeholder="0.0" />
-            </div>
-            <div class="form-divider"></div>
-            <div class="form-section-label">Indirect Labor</div>
-            <div class="form-group">
-              <label>Indirect Wages ($)</label>
-              <input type="number" id="f-il-wages" step="0.01" min="0" placeholder="0.00" />
-            </div>
-            <div class="form-group">
-              <label>Indirect Hours</label>
-              <input type="number" id="f-il-hours" step="0.1" min="0" placeholder="0.0" />
-            </div>
-            <div class="form-divider"></div>
-            <div class="form-section-label">Burden &amp; Benefits</div>
-            <div class="form-group">
-              <label>Labor Burden (auto-calc)</label>
-              <div class="calculated-field" id="f-burden-display">$0.00</div>
-              <input type="hidden" id="f-labor-burden" value="0" />
-            </div>
-            <div class="form-group">
-              <label>Additional Benefits ($)</label>
-              <input type="number" id="f-add-benefits" step="0.01" min="0" placeholder="0.00" />
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap">
-          <button type="button" class="btn btn-secondary" id="entry-clear-btn">
-            <i class="fas fa-times"></i> Clear
-          </button>
-          <button type="submit" class="btn btn-primary" id="entry-submit-btn">
-            <i class="fas fa-save"></i> Save Entry
-          </button>
-        </div>
-      </form>
+    <div class="page-body" id="page-body">
+      <!-- Views rendered by JS -->
     </div>
-
-    <!-- ========== OVERHEAD VIEW ========== -->
-    <div id="view-overhead" class="view">
-      <div class="oh-panels">
-        <!-- Fixed Overhead -->
-        <div class="card">
-          <h3><i class="fas fa-thumbtack"></i> Fixed Monthly Overhead</h3>
-          <div style="margin-bottom:14px">
-            <p style="font-size:13px;color:#6b7280">These items apply automatically every month.</p>
-          </div>
-          <div id="fixed-oh-list"></div>
-          <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6">
-            <div style="display:flex;gap:8px;margin-bottom:12px">
-              <input type="text" id="new-fixed-name" placeholder="Item name" style="flex:1;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;outline:none" />
-              <input type="number" id="new-fixed-amount" placeholder="$0.00" step="0.01" min="0" style="width:110px;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;outline:none" />
-            </div>
-            <button class="btn btn-primary btn-sm" id="add-fixed-btn">
-              <i class="fas fa-plus"></i> Add Item
-            </button>
-          </div>
-          <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:13px;color:#6b7280;font-weight:600">Monthly Fixed Total</span>
-            <span style="font-size:18px;font-weight:800;color:#111827" id="fixed-oh-total">$0.00</span>
-          </div>
-        </div>
-
-        <!-- One-time Overhead -->
-        <div class="card">
-          <h3><i class="fas fa-receipt"></i> One-Time Items</h3>
-          <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
-            <label style="font-size:13px;font-weight:600;color:#374151">Month:</label>
-            <input type="month" id="onetime-month-picker" style="padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;outline:none" />
-          </div>
-          <div id="onetime-oh-list"></div>
-          <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6">
-            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-              <input type="text" id="new-ot-name" placeholder="Item name" style="flex:1;min-width:120px;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;outline:none" />
-              <input type="number" id="new-ot-amount" placeholder="$0.00" step="0.01" min="0" style="width:110px;padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;outline:none" />
-            </div>
-            <button class="btn btn-primary btn-sm" id="add-ot-btn">
-              <i class="fas fa-plus"></i> Add Item
-            </button>
-          </div>
-          <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:13px;color:#6b7280;font-weight:600">One-Time Total</span>
-            <span style="font-size:18px;font-weight:800;color:#111827" id="onetime-oh-total">$0.00</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Monthly overhead summary -->
-      <div class="card">
-        <h3><i class="fas fa-calculator"></i> Monthly Overhead Summary</h3>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px">
-          <div>
-            <div style="font-size:12px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Fixed</div>
-            <div style="font-size:22px;font-weight:800;color:#111827" id="summ-fixed">$0.00</div>
-          </div>
-          <div>
-            <div style="font-size:12px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">One-Time</div>
-            <div style="font-size:22px;font-weight:800;color:#111827" id="summ-onetime">$0.00</div>
-          </div>
-          <div>
-            <div style="font-size:12px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Total This Month</div>
-            <div style="font-size:22px;font-weight:800;color:#4f6ef7" id="summ-total">$0.00</div>
-          </div>
-          <div>
-            <div style="font-size:12px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Weekly Avg (÷4.33)</div>
-            <div style="font-size:22px;font-weight:800;color:#374151" id="summ-weekly">$0.00</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ========== HISTORY VIEW ========== -->
-    <div id="view-history" class="view">
-      <div class="search-bar">
-        <input type="text" id="history-search" placeholder="Search by date or notes..." />
-        <button class="btn btn-secondary btn-sm" id="history-refresh-btn">
-          <i class="fas fa-sync-alt"></i> Refresh
-        </button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Week Start</th>
-              <th>Gross Rev</th>
-              <th>Net Rev</th>
-              <th>NR/Labor</th>
-              <th>GP %</th>
-              <th>Dir Hours</th>
-              <th>Notes</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="history-tbody">
-            <tr><td colspan="8"><div class="spinner"></div></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ========== SETTINGS VIEW ========== -->
-    <div id="view-settings" class="view">
-      <div class="card">
-        <h3><i class="fas fa-building"></i> Business Info</h3>
-        <div class="settings-grid">
-          <div class="form-group">
-            <label>Business Name</label>
-            <input type="text" id="s-biz-name" placeholder="NuWave Composites" />
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <h3><i class="fas fa-percent"></i> Labor Burden Rates</h3>
-        <div class="settings-grid">
-          <div class="form-group">
-            <label>Payroll Tax (%)</label>
-            <input type="number" id="s-payroll-tax" step="0.01" min="0" max="100" />
-          </div>
-          <div class="form-group">
-            <label>Workers Comp (%)</label>
-            <input type="number" id="s-workers-comp" step="0.01" min="0" max="100" />
-          </div>
-          <div class="form-group">
-            <label>FL Reemployment Tax (%)</label>
-            <input type="number" id="s-fl-reempl" step="0.01" min="0" max="100" />
-          </div>
-          <div class="form-group">
-            <label>Other Burden (%)</label>
-            <input type="number" id="s-other-burden" step="0.01" min="0" max="100" />
-          </div>
-          <div class="form-group" style="grid-column:1/-1">
-            <label>Total Burden Rate</label>
-            <div class="calculated-field" id="s-total-burden">0.00%</div>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <h3><i class="fas fa-bullseye"></i> KPI Targets</h3>
-        <div class="settings-grid">
-          <div class="form-group">
-            <label>NR / Labor Target (x)</label>
-            <input type="number" id="s-nr-labor-target" step="0.1" min="0" />
-          </div>
-          <div class="form-group">
-            <label>Gross Profit % Target</label>
-            <input type="number" id="s-gp-pct-target" step="0.1" min="0" max="100" />
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;justify-content:flex-end">
-        <button class="btn btn-primary" id="save-settings-btn">
-          <i class="fas fa-save"></i> Save Settings
-        </button>
-      </div>
-    </div>
-
-  </main>
-</div>
-
-<!-- Edit Entry Modal -->
-<div class="modal-overlay" id="edit-modal">
-  <div class="modal">
-    <div class="modal-header">
-      <h3>Edit Weekly Entry</h3>
-      <button onclick="closeEditModal()"><i class="fas fa-times"></i></button>
-    </div>
-    <div id="edit-modal-body"></div>
   </div>
 </div>
 
-<!-- Toast -->
-<div id="toast"></div>
+<!-- MODAL CONTAINER -->
+<div id="modal-container"></div>
+<!-- TOAST CONTAINER -->
+<div class="toast-container" id="toast-container"></div>
 
 <script>
-// ======================================================
+// =====================================================================
 // APP STATE
-// ======================================================
+// =====================================================================
 const state = {
+  view: 'dashboard',
   settings: null,
   weeks: [],
   selectedWeekId: null,
   overheadFixed: [],
   overheadOnetime: [],
-  charts: { nrLabor: null, nrGp: null },
-  editingId: null,
-  historyRaw: []
+  currentMonth: new Date().toISOString().slice(0,7)
 }
 
-// ======================================================
-// UTILS
-// ======================================================
-const fmt$ = (v) => {
-  const n = Number(v) || 0
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n)
+// =====================================================================
+// UTILITIES
+// =====================================================================
+const fmt = (n, decimals=0) => {
+  if (n == null || isNaN(n)) return '$0'
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
-const fmt$d = (v) => {
-  const n = Number(v) || 0
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+const fmtPct = (n, decimals=1) => {
+  if (n == null || isNaN(n)) return '0%'
+  return Number(n).toFixed(decimals) + '%'
 }
-const fmtPct = (v) => (Number(v) || 0).toFixed(1) + '%'
-const fmtX = (v) => (Number(v) || 0).toFixed(2) + 'x'
-const fmtDate = (d) => {
-  if (!d) return ''
-  const [y, m, day] = d.split('-')
-  return \`\${m}/\${day}/\${y}\`
-}
-const getMonthStr = (d = new Date()) => {
-  return d.toISOString().slice(0, 7)
-}
-const getMondayOfWeek = () => {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-  d.setDate(diff)
-  return d.toISOString().slice(0, 10)
+const fmtX = (n) => Number(n).toFixed(2) + 'x'
+const fmtHrs = (n) => Number(n).toFixed(1) + ' hrs'
+
+function showToast(msg, type='success') {
+  const tc = document.getElementById('toast-container')
+  const t = document.createElement('div')
+  t.className = 'toast ' + type
+  t.innerHTML = '<i class="fas fa-' + (type==='success'?'check-circle':'exclamation-circle') + '"></i> ' + msg
+  tc.appendChild(t)
+  setTimeout(() => t.remove(), 3200)
 }
 
-// ======================================================
-// TOAST
-// ======================================================
-let toastTimer
-function showToast(msg, type = 'success') {
-  const t = document.getElementById('toast')
-  t.textContent = msg
-  t.className = 'show ' + type
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { t.className = '' }, 3000)
-}
-
-// ======================================================
-// API HELPERS
-// ======================================================
-async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } }
-  if (body) opts.body = JSON.stringify(body)
-  const res = await fetch('/api' + path, opts)
+async function api(path, opts={}) {
+  const res = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
-// ======================================================
-// NAVIGATION
-// ======================================================
-const viewTitles = {
-  dashboard: 'Dashboard',
-  entry: 'Weekly Entry',
-  overhead: 'Overhead',
-  history: 'History',
-  settings: 'Settings'
-}
-function navigateTo(view) {
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'))
-  document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.remove('active'))
-  document.getElementById('view-' + view).classList.add('active')
-  document.querySelector(\`[data-view="\${view}"]\`).classList.add('active')
-  document.getElementById('page-title').textContent = viewTitles[view]
-  closeSidebar()
-  if (view === 'dashboard') loadDashboard()
-  if (view === 'overhead') loadOverhead()
-  if (view === 'history') loadHistory()
-  if (view === 'settings') loadSettings()
+function getWeekMonth(weekStart) {
+  return weekStart ? weekStart.slice(0,7) : state.currentMonth
 }
 
-// Sidebar nav click
-document.querySelectorAll('#sidebar nav a').forEach(a => {
-  a.addEventListener('click', () => navigateTo(a.dataset.view))
-})
+// =====================================================================
+// KPI CALCULATIONS
+// =====================================================================
+function calcKPIs(entry, overheadTotal) {
+  const gr = +entry.gross_revenue || 0
+  const cogs = +entry.cogs || 0
+  const dlw = +entry.direct_labor_wages || 0
+  const ilw = +entry.indirect_labor_wages || 0
+  const burden = +entry.labor_burden || 0
+  const benefits = +entry.additional_benefits || 0
+  const dlh = +entry.direct_labor_hours || 0
+  const oh = overheadTotal || 0
 
-// Mobile sidebar
-document.getElementById('mobile-menu-btn').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('open')
-  document.getElementById('sidebar-overlay').classList.toggle('open')
-})
-document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar)
-function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open')
-  document.getElementById('sidebar-overlay').classList.remove('open')
+  const nr = gr - cogs
+  const totalLabor = dlw + ilw + burden + benefits
+  const gp = nr - totalLabor
+  const gpPct = nr > 0 ? (gp / nr) * 100 : 0
+  const nrLaborRatio = totalLabor > 0 ? nr / totalLabor : 0
+  const np = gp - oh
+  const npPct = nr > 0 ? (np / nr) * 100 : 0
+  const nrPerHour = dlh > 0 ? nr / dlh : 0
+
+  return { gr, cogs, nr, totalLabor, dlw, ilw, burden, benefits, dlh, gp, gpPct, nrLaborRatio, oh, np, npPct, nrPerHour }
 }
 
-// ======================================================
-// SETTINGS
-// ======================================================
-async function loadSettings() {
-  try {
-    const s = await api('GET', '/settings')
-    state.settings = s
-    document.getElementById('s-biz-name').value = s.business_name || 'NuWave Composites'
-    document.getElementById('s-payroll-tax').value = s.payroll_tax_pct ?? 7.65
-    document.getElementById('s-workers-comp').value = s.workers_comp_pct ?? 4.00
-    document.getElementById('s-fl-reempl').value = s.fl_reemployment_pct ?? 0.50
-    document.getElementById('s-other-burden').value = s.other_burden_pct ?? 0.00
-    document.getElementById('s-nr-labor-target').value = s.nr_labor_target ?? 2.0
-    document.getElementById('s-gp-pct-target').value = s.gp_pct_target ?? 40
-    updateTotalBurden()
-    document.getElementById('sidebar-biz-name').textContent = s.business_name || 'NuWave Composites'
-  } catch(e) { showToast('Failed to load settings', 'error') }
+function calcBurden(wages, s) {
+  if (!s) return 0
+  const pct = (+s.payroll_tax_pct + +s.workers_comp_pct + +s.fl_reemployment_pct + +s.other_burden_pct) / 100
+  return wages * pct
 }
 
-function updateTotalBurden() {
-  const total = (
-    (parseFloat(document.getElementById('s-payroll-tax').value) || 0) +
-    (parseFloat(document.getElementById('s-workers-comp').value) || 0) +
-    (parseFloat(document.getElementById('s-fl-reempl').value) || 0) +
-    (parseFloat(document.getElementById('s-other-burden').value) || 0)
-  )
-  document.getElementById('s-total-burden').textContent = total.toFixed(2) + '%'
-}
-['s-payroll-tax','s-workers-comp','s-fl-reempl','s-other-burden'].forEach(id => {
-  document.getElementById(id).addEventListener('input', updateTotalBurden)
-})
-
-document.getElementById('save-settings-btn').addEventListener('click', async () => {
-  try {
-    const s = await api('PUT', '/settings', {
-      business_name: document.getElementById('s-biz-name').value,
-      payroll_tax_pct: parseFloat(document.getElementById('s-payroll-tax').value) || 0,
-      workers_comp_pct: parseFloat(document.getElementById('s-workers-comp').value) || 0,
-      fl_reemployment_pct: parseFloat(document.getElementById('s-fl-reempl').value) || 0,
-      other_burden_pct: parseFloat(document.getElementById('s-other-burden').value) || 0,
-      nr_labor_target: parseFloat(document.getElementById('s-nr-labor-target').value) || 2.0,
-      gp_pct_target: parseFloat(document.getElementById('s-gp-pct-target').value) || 40
-    })
-    state.settings = s
-    document.getElementById('sidebar-biz-name').textContent = s.business_name
-    showToast('Settings saved!', 'success')
-  } catch(e) { showToast('Failed to save settings', 'error') }
-})
-
-// ======================================================
-// KPI CALCULATION
-// ======================================================
-function calcKPIs(entry, weeklyOverhead = 0) {
-  const gross_revenue = Number(entry.gross_revenue) || 0
-  const cogs = Number(entry.cogs) || 0
-  const dl_wages = Number(entry.direct_labor_wages) || 0
-  const il_wages = Number(entry.indirect_labor_wages) || 0
-  const burden = Number(entry.labor_burden) || 0
-  const benefits = Number(entry.additional_benefits) || 0
-  const dl_hours = Number(entry.direct_labor_hours) || 0
-
-  const net_revenue = gross_revenue - cogs
-  const total_labor = dl_wages + il_wages + burden + benefits
-  const gross_profit = net_revenue - total_labor
-  const gp_pct = net_revenue > 0 ? (gross_profit / net_revenue) * 100 : 0
-  const nr_labor_ratio = total_labor > 0 ? net_revenue / total_labor : 0
-  const net_profit = gross_profit - weeklyOverhead
-  const np_pct = net_revenue > 0 ? (net_profit / net_revenue) * 100 : 0
-  const nr_per_dir_hr = dl_hours > 0 ? net_revenue / dl_hours : 0
-
-  return {
-    net_revenue, total_labor, gross_profit, gp_pct,
-    nr_labor_ratio, net_profit, np_pct, nr_per_dir_hr,
-    weeklyOverhead
-  }
-}
-
-function kpiColor(value, target, higherIsBetter = true) {
-  if (target === 0) return 'blue'
-  const ratio = value / target
+function kpiColor(val, target, higherIsBetter=true) {
+  if (!target) return 'neutral'
+  const ratio = val / target
   if (higherIsBetter) {
-    if (ratio >= 0.9) return 'green'
-    if (ratio >= 0.7) return 'yellow'
+    if (ratio >= 1) return 'green'
+    if (ratio >= 0.85) return 'yellow'
     return 'red'
   } else {
-    if (ratio <= 1.1) return 'green'
-    if (ratio <= 1.3) return 'yellow'
+    if (ratio <= 1) return 'green'
+    if (ratio <= 1.15) return 'yellow'
     return 'red'
   }
 }
 
-// ======================================================
-// DASHBOARD
-// ======================================================
-async function loadDashboard() {
-  if (!state.settings) {
-    try { state.settings = await api('GET', '/settings') } catch(e) {}
+// =====================================================================
+// NAVIGATION
+// =====================================================================
+const topbarMeta = {
+  dashboard: ['Dashboard', 'Weekly KPI overview'],
+  entry: ['Weekly Entry', 'Log a new week of data'],
+  overhead: ['Overhead', 'Manage fixed and one-time costs'],
+  history: ['History', 'Browse and edit past entries'],
+  settings: ['Settings', 'Configure rates and targets']
+}
+
+function navigate(view) {
+  state.view = view
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === view)
+  })
+  const [title, sub] = topbarMeta[view] || ['', '']
+  document.getElementById('topbar-title').textContent = title
+  document.getElementById('topbar-sub').textContent = sub
+  renderView()
+}
+
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.addEventListener('click', () => navigate(el.dataset.view))
+})
+
+// =====================================================================
+// RENDER ROUTER
+// =====================================================================
+async function renderView() {
+  const pb = document.getElementById('page-body')
+  pb.innerHTML = '<div style="text-align:center;padding:60px;color:var(--gray-400);"><i class="fas fa-spinner fa-spin" style="font-size:28px;"></i></div>'
+  try {
+    if (state.view === 'dashboard') await renderDashboard()
+    else if (state.view === 'entry') await renderEntry()
+    else if (state.view === 'overhead') await renderOverhead()
+    else if (state.view === 'history') await renderHistory()
+    else if (state.view === 'settings') await renderSettings()
+  } catch(e) {
+    pb.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>' + e.message + '</p></div>'
   }
-  try {
-    const weeks = await api('GET', '/weeks')
-    state.weeks = weeks
-    renderWeekPills(weeks)
-    if (weeks.length > 0) {
-      const id = state.selectedWeekId || weeks[0].id
-      state.selectedWeekId = id
-      await renderDashKPIs(id)
-    } else {
-      document.getElementById('dash-kpi-grid').innerHTML = \`
-        <div class="empty-state" style="grid-column:1/-1">
-          <i class="fas fa-chart-line"></i>
-          <p>No entries yet. <a href="#" onclick="navigateTo('entry');return false" style="color:#4f6ef7">Add your first week →</a></p>
-        </div>\`
-    }
-    renderCharts(weeks)
-  } catch(e) { showToast('Failed to load dashboard', 'error') }
 }
 
-function renderWeekPills(weeks) {
-  const el = document.getElementById('dash-week-pills')
-  if (!weeks.length) { el.innerHTML = ''; return }
-  el.innerHTML = weeks.slice(0, 10).map(w => \`
-    <button class="week-pill \${w.id === state.selectedWeekId ? 'active' : ''}"
-      onclick="selectWeek(\${w.id})">\${fmtDate(w.week_start)}</button>
-  \`).join('')
-}
+// =====================================================================
+// DASHBOARD VIEW
+// =====================================================================
+async function renderDashboard() {
+  const [weeks, settings] = await Promise.all([
+    api('/weeks'),
+    api('/settings')
+  ])
+  state.weeks = weeks
+  state.settings = settings
+  document.getElementById('business-name-display').textContent = settings.business_name
 
-async function selectWeek(id) {
-  state.selectedWeekId = id
-  document.querySelectorAll('.week-pill').forEach(p => p.classList.remove('active'))
-  document.querySelector(\`.week-pill[onclick="selectWeek(\${id})"]\`)?.classList.add('active')
-  await renderDashKPIs(id)
-}
+  if (!weeks.length) {
+    document.getElementById('page-body').innerHTML = \`
+      <div class="empty-state">
+        <i class="fas fa-chart-line"></i>
+        <p>No weekly entries yet. <a href="#" onclick="navigate('entry');return false;" style="color:var(--accent);">Add your first week →</a></p>
+      </div>\`
+    return
+  }
 
-async function renderDashKPIs(id) {
-  const entry = state.weeks.find(w => w.id === id)
-  if (!entry) return
-  document.getElementById('topbar-week').textContent = 'Week of ' + fmtDate(entry.week_start)
+  if (!state.selectedWeekId || !weeks.find(w=>w.id===state.selectedWeekId)) {
+    state.selectedWeekId = weeks[0].id
+  }
 
-  // get overhead for this week's month
-  const month = entry.week_start.slice(0, 7)
-  let weeklyOverhead = 0
-  try {
-    const oh = await api('GET', \`/overhead/summary/\${month}\`)
-    weeklyOverhead = (oh.grand_total || 0) / 4.33
-  } catch(e) {}
+  const selected = weeks.find(w=>w.id===state.selectedWeekId)
+  const month = getWeekMonth(selected.week_start)
+  const ohSummary = await api('/overhead/summary/' + month)
+  const weeklyOH = ohSummary.grand_total / 4.33
 
-  const s = state.settings || {}
-  const t = state.settings || {}
-  const kpi = calcKPIs(entry, weeklyOverhead)
+  const kpi = calcKPIs(selected, weeklyOH)
+  const s = settings
+  const nrlColor = kpiColor(kpi.nrLaborRatio, s.nr_labor_target, true)
+  const gpColor = kpiColor(kpi.gpPct, s.gp_pct_target, true)
+  const npColor = kpi.np >= 0 ? 'green' : 'red'
 
-  const nrLaborColor = kpiColor(kpi.nr_labor_ratio, t.nr_labor_target || 2.0)
-  const gpColor = kpiColor(kpi.gp_pct, t.gp_pct_target || 40)
+  const pillsHTML = weeks.slice(0, 10).map(w => \`
+    <div class="week-pill\${w.id===state.selectedWeekId?' active':''}" data-wid="\${w.id}">
+      \${formatWeekLabel(w.week_start)}
+    </div>\`).join('')
 
-  document.getElementById('dash-kpi-grid').innerHTML = \`
-    <div class="kpi-card \${nrLaborColor}">
-      <div class="label">NR / Labor Cost</div>
-      <div class="value">\${fmtX(kpi.nr_labor_ratio)}</div>
-      <div class="sub">Target: \${fmtX(t.nr_labor_target || 2.0)}</div>
-      <span class="badge \${nrLaborColor}"><i class="fas fa-\${nrLaborColor==='green'?'check':nrLaborColor==='yellow'?'exclamation':'times'}"></i> Primary KPI</span>
+  document.getElementById('page-body').innerHTML = \`
+    <div class="week-pills" id="week-pills">\${pillsHTML}</div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card neutral">
+        <div class="kpi-label">Net Revenue</div>
+        <div class="kpi-value">\${fmt(kpi.nr)}</div>
+        <div class="kpi-sub">Gross \${fmt(kpi.gr)} − COGS \${fmt(kpi.cogs)}</div>
+      </div>
+      <div class="kpi-card \${nrlColor}">
+        <div class="kpi-label">NR / Labor Cost</div>
+        <div class="kpi-value">\${fmtX(kpi.nrLaborRatio)}</div>
+        <div class="kpi-sub">Target: \${fmtX(s.nr_labor_target)}</div>
+        <div class="kpi-badge \${nrlColor}"><i class="fas fa-\${nrlColor==='green'?'check':'exclamation'}-circle"></i> \${nrlColor==='green'?'On Target':nrlColor==='yellow'?'Near Target':'Below Target'}</div>
+      </div>
+      <div class="kpi-card \${gpColor}">
+        <div class="kpi-label">Gross Profit</div>
+        <div class="kpi-value">\${fmt(kpi.gp)}</div>
+        <div class="kpi-sub">\${fmtPct(kpi.gpPct)} GP% (target \${fmtPct(s.gp_pct_target)})</div>
+        <div class="kpi-badge \${gpColor}"><i class="fas fa-\${gpColor==='green'?'check':'exclamation'}-circle"></i> \${fmtPct(kpi.gpPct)}</div>
+      </div>
+      <div class="kpi-card neutral">
+        <div class="kpi-label">Weekly Overhead</div>
+        <div class="kpi-value">\${fmt(weeklyOH)}</div>
+        <div class="kpi-sub">\${fmt(ohSummary.grand_total)}/mo ÷ 4.33</div>
+      </div>
+      <div class="kpi-card \${npColor}">
+        <div class="kpi-label">Net Profit</div>
+        <div class="kpi-value">\${fmt(kpi.np)}</div>
+        <div class="kpi-sub">\${fmtPct(kpi.npPct)} NP%</div>
+        <div class="kpi-badge \${npColor}"><i class="fas fa-\${npColor==='green'?'arrow-up':'arrow-down'}"></i> \${fmtPct(kpi.npPct)}</div>
+      </div>
+      <div class="kpi-card neutral">
+        <div class="kpi-label">NR / Direct Hour</div>
+        <div class="kpi-value">\${fmt(kpi.nrPerHour)}</div>
+        <div class="kpi-sub">\${fmtHrs(kpi.dlh)} direct hours</div>
+      </div>
+      <div class="kpi-card neutral">
+        <div class="kpi-label">Total Labor Cost</div>
+        <div class="kpi-value">\${fmt(kpi.totalLabor)}</div>
+        <div class="kpi-sub">DL \${fmt(kpi.dlw)} + IL \${fmt(kpi.ilw)} + Burden</div>
+      </div>
+      <div class="kpi-card neutral">
+        <div class="kpi-label">Labor Burden</div>
+        <div class="kpi-value">\${fmt(kpi.burden)}</div>
+        <div class="kpi-sub">+ Benefits \${fmt(kpi.benefits)}</div>
+      </div>
     </div>
-    <div class="kpi-card blue">
-      <div class="label">Net Revenue</div>
-      <div class="value">\${fmt$(kpi.net_revenue)}</div>
-      <div class="sub">Gross: \${fmt$(entry.gross_revenue)}</div>
-    </div>
-    <div class="kpi-card \${gpColor}">
-      <div class="label">Gross Profit</div>
-      <div class="value">\${fmt$(kpi.gross_profit)}</div>
-      <div class="sub">GP%: \${fmtPct(kpi.gp_pct)} (target \${fmtPct(t.gp_pct_target || 40)})</div>
-      <span class="badge \${gpColor}">\${fmtPct(kpi.gp_pct)}</span>
-    </div>
-    <div class="kpi-card \${kpi.net_profit >= 0 ? 'green' : 'red'}">
-      <div class="label">Net Profit</div>
-      <div class="value">\${fmt$(kpi.net_profit)}</div>
-      <div class="sub">NP%: \${fmtPct(kpi.np_pct)}</div>
-    </div>
-    <div class="kpi-card blue">
-      <div class="label">Total Labor Cost</div>
-      <div class="value">\${fmt$(kpi.total_labor)}</div>
-      <div class="sub">Burden: \${fmt$d(entry.labor_burden)}</div>
-    </div>
-    <div class="kpi-card blue">
-      <div class="label">Weekly Overhead</div>
-      <div class="value">\${fmt$(kpi.weeklyOverhead)}</div>
-      <div class="sub">Monthly ÷ 4.33</div>
-    </div>
-    <div class="kpi-card \${kpi.nr_per_dir_hr > 0 ? 'green' : 'blue'}">
-      <div class="label">NR / Direct Hour</div>
-      <div class="value">\${fmt$(kpi.nr_per_dir_hr)}</div>
-      <div class="sub">Dir hours: \${Number(entry.direct_labor_hours).toFixed(1)}</div>
+
+    <div class="charts-grid">
+      <div class="card">
+        <div class="card-header"><div class="card-title"><i class="fas fa-chart-line" style="color:var(--accent);margin-right:6px;"></i>NR / Labor Ratio Trend</div></div>
+        <div class="card-body"><div class="chart-wrap"><canvas id="chart-ratio"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><i class="fas fa-chart-bar" style="color:var(--accent);margin-right:6px;"></i>Net Revenue vs Gross Profit</div></div>
+        <div class="card-body"><div class="chart-wrap"><canvas id="chart-bar"></canvas></div></div>
+      </div>
     </div>
   \`
-}
 
-// ======================================================
-// CHARTS
-// ======================================================
-function renderCharts(weeks) {
-  const last8 = [...weeks].reverse().slice(-8)
-  const labels = last8.map(w => fmtDate(w.week_start))
-  const nrLaborData = last8.map(w => {
-    const kpi = calcKPIs(w)
-    return parseFloat(kpi.nr_labor_ratio.toFixed(2))
+  // Week pill click
+  document.getElementById('week-pills').addEventListener('click', async e => {
+    const pill = e.target.closest('.week-pill')
+    if (!pill) return
+    state.selectedWeekId = +pill.dataset.wid
+    await renderDashboard()
   })
-  const nrData = last8.map(w => Number(w.gross_revenue) - Number(w.cogs))
-  const gpData = last8.map(w => {
-    const kpi = calcKPIs(w)
-    return parseFloat(kpi.gross_profit.toFixed(0))
-  })
-  const target = state.settings?.nr_labor_target || 2.0
 
-  // Chart 1: NR/Labor trend
-  const ctx1 = document.getElementById('chart-nr-labor').getContext('2d')
-  if (state.charts.nrLabor) state.charts.nrLabor.destroy()
-  state.charts.nrLabor = new Chart(ctx1, {
+  // Build charts with last 8 weeks (oldest → newest)
+  const chartWeeks = [...weeks].reverse().slice(-8)
+  const labels = chartWeeks.map(w => formatWeekLabel(w.week_start))
+  const ratios = chartWeeks.map(w => {
+    const k = calcKPIs(w, 0)
+    return +k.nrLaborRatio.toFixed(2)
+  })
+  const nrs = chartWeeks.map(w => +(w.gross_revenue - w.cogs).toFixed(2))
+  const gps = chartWeeks.map(w => {
+    const k = calcKPIs(w, 0)
+    return +k.gp.toFixed(2)
+  })
+
+  // Ratio trend line
+  new Chart(document.getElementById('chart-ratio'), {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        {
-          label: 'NR / Labor',
-          data: nrLaborData,
-          borderColor: '#4f6ef7',
-          backgroundColor: 'rgba(79,110,247,0.1)',
-          tension: 0.4,
-          fill: true,
-          pointBackgroundColor: '#4f6ef7',
-          pointRadius: 4
-        },
-        {
-          label: 'Target (' + target + 'x)',
-          data: last8.map(() => target),
-          borderColor: '#10b981',
-          borderDash: [6, 4],
-          borderWidth: 2,
-          pointRadius: 0,
-          fill: false
-        }
-      ]
+      datasets: [{
+        label: 'NR/Labor', data: ratios, borderColor: '#4f6ef7',
+        backgroundColor: 'rgba(79,110,247,.08)', fill: true,
+        tension: .3, pointBackgroundColor: '#4f6ef7', pointRadius: 4
+      }, {
+        label: 'Target', data: chartWeeks.map(()=>s.nr_labor_target),
+        borderColor: '#22c55e', borderDash: [5,4], pointRadius: 0, fill: false
+      }]
     },
-    options: {
-      responsive: true,
-      plugins: { legend: { labels: { font: { family: 'Inter', size: 12 } } } },
-      scales: {
-        x: { grid: { display: false }, ticks: { font: { size: 10 } } },
-        y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } }
-      }
-    }
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{font:{size:11}}}}, scales:{y:{ticks:{font:{size:11}},grid:{color:'#f3f4f6'}},x:{ticks:{font:{size:10}},grid:{display:false}}} }
   })
 
-  // Chart 2: NR vs GP bar
-  const ctx2 = document.getElementById('chart-nr-gp').getContext('2d')
-  if (state.charts.nrGp) state.charts.nrGp.destroy()
-  state.charts.nrGp = new Chart(ctx2, {
+  // Bar chart
+  new Chart(document.getElementById('chart-bar'), {
     type: 'bar',
     data: {
       labels,
       datasets: [
-        { label: 'Net Revenue', data: nrData, backgroundColor: '#4f6ef7', borderRadius: 4 },
-        { label: 'Gross Profit', data: gpData, backgroundColor: '#10b981', borderRadius: 4 }
+        { label: 'Net Revenue', data: nrs, backgroundColor: 'rgba(79,110,247,.75)', borderRadius: 4 },
+        { label: 'Gross Profit', data: gps, backgroundColor: 'rgba(34,197,94,.65)', borderRadius: 4 }
       ]
     },
-    options: {
-      responsive: true,
-      plugins: { legend: { labels: { font: { family: 'Inter', size: 12 } } } },
-      scales: {
-        x: { grid: { display: false }, ticks: { font: { size: 10 } } },
-        y: {
-          grid: { color: '#f3f4f6' },
-          ticks: {
-            font: { size: 11 },
-            callback: v => '\$' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v)
-          }
-        }
-      }
-    }
+    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{font:{size:11}}}}, scales:{y:{ticks:{callback:v=>'\$'+v.toLocaleString(),font:{size:11}},grid:{color:'#f3f4f6'}},x:{ticks:{font:{size:10}},grid:{display:false}}} }
   })
 }
 
-// ======================================================
-// WEEKLY ENTRY FORM
-// ======================================================
-function calcBurden() {
-  if (!state.settings) return 0
-  const s = state.settings
-  const totalWages = (parseFloat(document.getElementById('f-dl-wages').value) || 0) +
-                     (parseFloat(document.getElementById('f-il-wages').value) || 0)
-  const rate = (s.payroll_tax_pct + s.workers_comp_pct + s.fl_reemployment_pct + s.other_burden_pct) / 100
-  return totalWages * rate
+function formatWeekLabel(weekStart) {
+  if (!weekStart) return '—'
+  const d = new Date(weekStart + 'T00:00:00')
+  return (d.getMonth()+1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(2)
 }
 
-function updateLivePreview() {
-  const burden = calcBurden()
-  document.getElementById('f-labor-burden').value = burden.toFixed(2)
-  document.getElementById('f-burden-display').textContent = fmt$d(burden)
+// =====================================================================
+// WEEKLY ENTRY VIEW
+// =====================================================================
+let entryEditId = null
+
+async function renderEntry(editEntry=null) {
+  if (!state.settings) state.settings = await api('/settings')
+  const s = state.settings
+  const e = editEntry || {}
+  entryEditId = editEntry ? editEntry.id : null
+
+  // Default week start = next Monday from today
+  const todayWeekStart = getMonday(new Date())
+
+  document.getElementById('page-body').innerHTML = \`
+    <div class="card" style="max-width:780px;">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-\${entryEditId?'edit':'plus'}-circle" style="color:var(--accent);margin-right:6px;"></i>\${entryEditId?'Edit Entry':'New Weekly Entry'}</div>
+        \${entryEditId ? '<button class="btn btn-secondary btn-sm" onclick="renderEntry()"><i class="fas fa-times"></i> Cancel Edit</button>' : ''}
+      </div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Week Start Date</label>
+            <input type="date" id="f-week-start" value="\${e.week_start || todayWeekStart}" />
+          </div>
+          <div class="form-group full">
+            <label>Notes (optional)</label>
+            <textarea id="f-notes" placeholder="Any notes for this week...">\${e.notes||''}</textarea>
+          </div>
+        </div>
+
+        <hr class="divider" />
+        <div class="section-title">Revenue & COGS</div>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="form-group">
+            <label>Gross Revenue</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-gross-rev" step="0.01" min="0" value="\${e.gross_revenue||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+          </div>
+          <div class="form-group">
+            <label>Cost of Goods Sold (COGS)</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-cogs" step="0.01" min="0" value="\${e.cogs||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+          </div>
+        </div>
+
+        <hr class="divider" />
+        <div class="section-title">Direct Labor</div>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="form-group">
+            <label>Direct Labor Wages</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-dl-wages" step="0.01" min="0" value="\${e.direct_labor_wages||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+          </div>
+          <div class="form-group">
+            <label>Direct Labor Hours</label>
+            <div class="input-suffix"><span>hrs</span><input type="number" id="f-dl-hours" step="0.1" min="0" value="\${e.direct_labor_hours||''}" placeholder="0.0" oninput="updatePreview()" /></div>
+          </div>
+        </div>
+
+        <hr class="divider" />
+        <div class="section-title">Indirect Labor</div>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="form-group">
+            <label>Indirect Labor Wages</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-il-wages" step="0.01" min="0" value="\${e.indirect_labor_wages||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+          </div>
+          <div class="form-group">
+            <label>Indirect Labor Hours</label>
+            <div class="input-suffix"><span>hrs</span><input type="number" id="f-il-hours" step="0.1" min="0" value="\${e.indirect_labor_hours||''}" placeholder="0.0" oninput="updatePreview()" /></div>
+          </div>
+        </div>
+
+        <hr class="divider" />
+        <div class="section-title" style="margin-bottom:4px;">Labor Burden & Benefits</div>
+        <div class="section-sub">Burden is auto-calculated from Settings rates applied to total wages.</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Labor Burden (auto-calculated)</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-burden" step="0.01" placeholder="Auto" readonly style="background:var(--gray-50);color:var(--gray-500);" value="\${e.labor_burden||''}" /></div>
+            <span style="font-size:11px;color:var(--gray-400);margin-top:2px;" id="burden-breakdown"></span>
+          </div>
+          <div class="form-group">
+            <label>Additional Benefits (manual)</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-benefits" step="0.01" min="0" value="\${e.additional_benefits||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+          </div>
+        </div>
+
+        <!-- LIVE KPI PREVIEW -->
+        <div class="kpi-preview" id="kpi-preview-box">
+          <h4><i class="fas fa-bolt"></i> Live KPI Preview</h4>
+          <div class="kpi-preview-grid" id="kpi-preview-grid">
+            <div class="kpi-prev-item"><div class="label">Net Revenue</div><div class="val" id="prev-nr">—</div></div>
+            <div class="kpi-prev-item"><div class="label">NR / Labor</div><div class="val" id="prev-ratio">—</div></div>
+            <div class="kpi-prev-item"><div class="label">Gross Profit</div><div class="val" id="prev-gp">—</div></div>
+            <div class="kpi-prev-item"><div class="label">GP%</div><div class="val" id="prev-gp-pct">—</div></div>
+            <div class="kpi-prev-item"><div class="label">Total Labor</div><div class="val" id="prev-labor">—</div></div>
+            <div class="kpi-prev-item"><div class="label">NR / Direct Hr</div><div class="val" id="prev-nrhr">—</div></div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:24px;">
+          <button class="btn btn-primary" id="save-entry-btn" onclick="saveEntry()">
+            <i class="fas fa-save"></i> \${entryEditId ? 'Update Entry' : 'Save Entry'}
+          </button>
+          <button class="btn btn-secondary" onclick="navigate('dashboard')">Cancel</button>
+        </div>
+      </div>
+    </div>
+  \`
+  updatePreview()
+}
+
+function getMonday(d) {
+  const date = new Date(d)
+  const day = date.getDay()
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1)
+  date.setDate(diff)
+  return date.toISOString().slice(0,10)
+}
+
+function updatePreview() {
+  const s = state.settings || {}
+  const dlw = +document.getElementById('f-dl-wages')?.value || 0
+  const ilw = +document.getElementById('f-il-wages')?.value || 0
+  const totalWages = dlw + ilw
+  const burden = calcBurden(totalWages, s)
+
+  const burdenEl = document.getElementById('f-burden')
+  if (burdenEl) burdenEl.value = burden.toFixed(2)
+
+  const pctTotal = (+s.payroll_tax_pct||0) + (+s.workers_comp_pct||0) + (+s.fl_reemployment_pct||0) + (+s.other_burden_pct||0)
+  const breakdownEl = document.getElementById('burden-breakdown')
+  if (breakdownEl) breakdownEl.textContent = pctTotal.toFixed(2) + '% × $' + totalWages.toFixed(2) + ' wages'
 
   const entry = {
-    gross_revenue: parseFloat(document.getElementById('f-gross-revenue').value) || 0,
-    cogs: parseFloat(document.getElementById('f-cogs').value) || 0,
-    direct_labor_wages: parseFloat(document.getElementById('f-dl-wages').value) || 0,
-    direct_labor_hours: parseFloat(document.getElementById('f-dl-hours').value) || 0,
-    indirect_labor_wages: parseFloat(document.getElementById('f-il-wages').value) || 0,
-    indirect_labor_hours: parseFloat(document.getElementById('f-il-hours').value) || 0,
+    gross_revenue: +document.getElementById('f-gross-rev')?.value || 0,
+    cogs: +document.getElementById('f-cogs')?.value || 0,
+    direct_labor_wages: dlw,
+    direct_labor_hours: +document.getElementById('f-dl-hours')?.value || 0,
+    indirect_labor_wages: ilw,
+    indirect_labor_hours: +document.getElementById('f-il-hours')?.value || 0,
     labor_burden: burden,
-    additional_benefits: parseFloat(document.getElementById('f-add-benefits').value) || 0
+    additional_benefits: +document.getElementById('f-benefits')?.value || 0
   }
-  const kpi = calcKPIs(entry)
-  const s = state.settings || {}
-  const nrTarget = s.nr_labor_target || 2.0
+
+  const kpi = calcKPIs(entry, 0)
+  const target = s.nr_labor_target || 2.0
   const gpTarget = s.gp_pct_target || 40
 
-  const nrLaborEl = document.getElementById('prev-nrlabor')
-  const nrColor = kpi.nr_labor_ratio >= nrTarget ? 'green' : kpi.nr_labor_ratio >= nrTarget * 0.7 ? 'yellow' : 'red'
-  const gpColor = kpi.gp_pct >= gpTarget ? 'green' : kpi.gp_pct >= gpTarget * 0.7 ? 'yellow' : 'red'
+  const ratioColor = kpiColor(kpi.nrLaborRatio, target, true)
+  const gpPctColor = kpiColor(kpi.gpPct, gpTarget, true)
 
-  document.getElementById('prev-nr').textContent = fmt$(kpi.net_revenue)
-  nrLaborEl.textContent = fmtX(kpi.nr_labor_ratio)
-  nrLaborEl.className = 'pvalue ' + nrColor
-  document.getElementById('prev-gp').textContent = fmt$(kpi.gross_profit)
-  const gpPctEl = document.getElementById('prev-gppct')
-  gpPctEl.textContent = fmtPct(kpi.gp_pct)
-  gpPctEl.className = 'pvalue ' + gpColor
-  document.getElementById('prev-labor').textContent = fmt$(kpi.total_labor)
-  document.getElementById('prev-nrhour').textContent = fmt$(kpi.nr_per_dir_hr)
+  const set = (id, val, cls='') => {
+    const el = document.getElementById(id)
+    if (el) { el.textContent = val; el.className = 'val ' + cls }
+  }
+  set('prev-nr', fmt(kpi.nr))
+  set('prev-ratio', fmtX(kpi.nrLaborRatio), ratioColor)
+  set('prev-gp', fmt(kpi.gp))
+  set('prev-gp-pct', fmtPct(kpi.gpPct), gpPctColor)
+  set('prev-labor', fmt(kpi.totalLabor))
+  set('prev-nrhr', kpi.dlh > 0 ? fmt(kpi.nrPerHour) : '—')
 }
 
-// Attach live preview listeners
-['f-gross-revenue','f-cogs','f-dl-wages','f-dl-hours','f-il-wages','f-il-hours','f-add-benefits'].forEach(id => {
-  document.getElementById(id).addEventListener('input', updateLivePreview)
-})
-
-// Set default week start to Monday
-document.getElementById('f-week-start').value = getMondayOfWeek()
-
-// Entry form submit
-document.getElementById('entry-form').addEventListener('submit', async (e) => {
-  e.preventDefault()
-  const id = document.getElementById('entry-id').value
-  const burden = parseFloat(document.getElementById('f-labor-burden').value) || 0
-  const payload = {
+async function saveEntry() {
+  const burden = +document.getElementById('f-burden')?.value || 0
+  const body = {
     week_start: document.getElementById('f-week-start').value,
     notes: document.getElementById('f-notes').value,
-    gross_revenue: parseFloat(document.getElementById('f-gross-revenue').value) || 0,
-    cogs: parseFloat(document.getElementById('f-cogs').value) || 0,
-    direct_labor_wages: parseFloat(document.getElementById('f-dl-wages').value) || 0,
-    direct_labor_hours: parseFloat(document.getElementById('f-dl-hours').value) || 0,
-    indirect_labor_wages: parseFloat(document.getElementById('f-il-wages').value) || 0,
-    indirect_labor_hours: parseFloat(document.getElementById('f-il-hours').value) || 0,
+    gross_revenue: +document.getElementById('f-gross-rev').value || 0,
+    cogs: +document.getElementById('f-cogs').value || 0,
+    direct_labor_wages: +document.getElementById('f-dl-wages').value || 0,
+    direct_labor_hours: +document.getElementById('f-dl-hours').value || 0,
+    indirect_labor_wages: +document.getElementById('f-il-wages').value || 0,
+    indirect_labor_hours: +document.getElementById('f-il-hours').value || 0,
     labor_burden: burden,
-    additional_benefits: parseFloat(document.getElementById('f-add-benefits').value) || 0
+    additional_benefits: +document.getElementById('f-benefits').value || 0
   }
+
+  if (!body.week_start) { showToast('Please select a week start date.', 'error'); return }
+
+  const btn = document.getElementById('save-entry-btn')
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'
+
   try {
-    if (id) {
-      await api('PUT', '/weeks/' + id, payload)
-      showToast('Entry updated!', 'success')
+    if (entryEditId) {
+      await api('/weeks/' + entryEditId, { method: 'PUT', body: JSON.stringify(body) })
+      showToast('Entry updated!')
     } else {
-      await api('POST', '/weeks', payload)
-      showToast('Entry saved!', 'success')
+      const created = await api('/weeks', { method: 'POST', body: JSON.stringify(body) })
+      state.selectedWeekId = created.id
+      showToast('Entry saved!')
     }
-    clearEntryForm()
-    navigateTo('dashboard')
-  } catch(e) {
-    showToast('Error saving entry: ' + e.message, 'error')
+    navigate('dashboard')
+  } catch(err) {
+    showToast('Error: ' + err.message, 'error')
+    btn.disabled = false
+    btn.innerHTML = '<i class="fas fa-save"></i> Save Entry'
   }
-})
-
-function clearEntryForm() {
-  document.getElementById('entry-id').value = ''
-  document.getElementById('entry-form').reset()
-  document.getElementById('f-week-start').value = getMondayOfWeek()
-  updateLivePreview()
-  document.getElementById('entry-submit-btn').innerHTML = '<i class="fas fa-save"></i> Save Entry'
-}
-document.getElementById('entry-clear-btn').addEventListener('click', clearEntryForm)
-
-// ======================================================
-// OVERHEAD
-// ======================================================
-async function loadOverhead() {
-  // Set month picker to current month
-  const mp = document.getElementById('onetime-month-picker')
-  if (!mp.value) mp.value = getMonthStr()
-  await Promise.all([loadFixedOverhead(), loadOnetimeOverhead()])
-  updateOverheadSummary()
 }
 
-async function loadFixedOverhead() {
-  try {
-    const items = await api('GET', '/overhead/fixed')
-    state.overheadFixed = items
-    renderFixedList()
-  } catch(e) {}
-}
+// =====================================================================
+// OVERHEAD VIEW
+// =====================================================================
+async function renderOverhead() {
+  const [fixed, s] = await Promise.all([api('/overhead/fixed'), api('/settings')])
+  state.overheadFixed = fixed
+  state.settings = s
+  const onetime = await api('/overhead/onetime?month=' + state.currentMonth)
+  state.overheadOnetime = onetime
 
-function renderFixedList() {
-  const el = document.getElementById('fixed-oh-list')
-  if (!state.overheadFixed.length) {
-    el.innerHTML = '<div class="empty-state"><i class="fas fa-thumbtack"></i><p>No fixed items yet</p></div>'
-    document.getElementById('fixed-oh-total').textContent = '$0.00'
-    return
-  }
-  el.innerHTML = state.overheadFixed.map(item => \`
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f3f4f6" id="foh-\${item.id}">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:0 0 auto">
-        <input type="checkbox" \${item.active ? 'checked' : ''} onchange="toggleFixed(\${item.id},this.checked)" style="accent-color:#4f6ef7" />
-      </label>
-      <span style="flex:1;font-size:14px;color:\${item.active?'#111827':'#9ca3af'};text-decoration:\${item.active?'none':'line-through'}">\${item.name}</span>
-      <span style="font-size:14px;font-weight:600;color:#374151">\${fmt$d(item.amount)}</span>
-      <button class="btn btn-danger btn-icon btn-sm" onclick="deleteFixed(\${item.id})"><i class="fas fa-trash"></i></button>
+  const fixedTotal = fixed.filter(f=>f.active).reduce((a,b)=>a+(+b.amount),0)
+  const onetimeTotal = onetime.reduce((a,b)=>a+(+b.amount),0)
+
+  const fixedRows = fixed.length ? fixed.map(item => \`
+    <tr>
+      <td>\${item.name}</td>
+      <td>\${fmt(item.amount)}</td>
+      <td>
+        <div class="toggle \${item.active?'on':''}" onclick="toggleFixed(\${item.id},\${item.active?0:1},this)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          <span class="toggle-label">\${item.active?'Active':'Off'}</span>
+        </div>
+      </td>
+      <td>
+        <div class="td-actions">
+          <button class="btn-icon" onclick="editFixed(\${item.id})"><i class="fas fa-pen"></i></button>
+          <button class="btn-icon danger" onclick="deleteFixed(\${item.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>\`).join('') : '<tr><td colspan="4"><div class="empty-state" style="padding:20px;"><i class="fas fa-plus-circle" style="font-size:20px;"></i><p>No fixed items yet</p></div></td></tr>'
+
+  const onetimeRows = onetime.length ? onetime.map(item => \`
+    <tr>
+      <td>\${item.name}</td>
+      <td>\${fmt(item.amount)}</td>
+      <td>
+        <div class="td-actions">
+          <button class="btn-icon" onclick="editOnetime(\${item.id})"><i class="fas fa-pen"></i></button>
+          <button class="btn-icon danger" onclick="deleteOnetime(\${item.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      </td>
+    </tr>\`).join('') : '<tr><td colspan="3"><div class="empty-state" style="padding:20px;"><i class="fas fa-plus-circle" style="font-size:20px;"></i><p>No one-time items this month</p></div></td></tr>'
+
+  document.getElementById('page-body').innerHTML = \`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <!-- FIXED -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><i class="fas fa-repeat" style="color:var(--accent);margin-right:6px;"></i>Fixed Monthly Overhead</div>
+            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Apply every month automatically</div>
+          </div>
+          <div>
+            <div style="text-align:right;font-size:18px;font-weight:700;color:var(--gray-900);">\${fmt(fixedTotal)}/mo</div>
+            <div style="text-align:right;font-size:11px;color:var(--gray-400);">\${fmt(fixedTotal/4.33)}/wk avg</div>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Item</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+              <tbody id="fixed-tbody">\${fixedRows}</tbody>
+            </table>
+          </div>
+          <div style="padding:16px;">
+            <button class="btn btn-primary btn-sm" onclick="openFixedModal()"><i class="fas fa-plus"></i> Add Fixed Item</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ONE-TIME -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><i class="fas fa-calendar-day" style="color:var(--accent);margin-right:6px;"></i>One-Time Items</div>
+            <div style="font-size:11px;color:var(--gray-400);margin-top:2px;">Non-recurring expenses this month</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="month" id="onetime-month" value="\${state.currentMonth}" onchange="changeOnetimeMonth(this.value)" style="font-size:12px;padding:5px 10px;border:1.5px solid var(--gray-200);border-radius:8px;font-family:inherit;" />
+          </div>
+        </div>
+        <div class="card-body" style="padding:0;">
+          <div style="background:var(--accent-light);padding:10px 16px;border-bottom:1px solid rgba(79,110,247,.1);display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:12px;font-weight:600;color:var(--gray-600);">Month Total</span>
+            <span style="font-size:16px;font-weight:700;color:var(--gray-900);">\${fmt(onetimeTotal)}</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Item</th><th>Amount</th><th></th></tr></thead>
+              <tbody id="onetime-tbody">\${onetimeRows}</tbody>
+            </table>
+          </div>
+          <div style="padding:16px;">
+            <button class="btn btn-primary btn-sm" onclick="openOnetimeModal()"><i class="fas fa-plus"></i> Add One-Time Item</button>
+          </div>
+        </div>
+      </div>
     </div>
-  \`).join('')
-  const total = state.overheadFixed.filter(i => i.active).reduce((s, i) => s + i.amount, 0)
-  document.getElementById('fixed-oh-total').textContent = fmt$d(total)
+
+    <!-- SUMMARY CARD -->
+    <div class="card" style="margin-top:20px;">
+      <div class="card-header"><div class="card-title">Monthly Overhead Summary — \${state.currentMonth}</div></div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:20px;text-align:center;">
+          <div><div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;">Fixed</div><div style="font-size:22px;font-weight:700;color:var(--gray-900);margin-top:4px;">\${fmt(fixedTotal)}</div></div>
+          <div><div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;">One-Time</div><div style="font-size:22px;font-weight:700;color:var(--gray-900);margin-top:4px;">\${fmt(onetimeTotal)}</div></div>
+          <div><div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;">Grand Total</div><div style="font-size:22px;font-weight:700;color:var(--accent);margin-top:4px;">\${fmt(fixedTotal+onetimeTotal)}</div></div>
+          <div><div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;">Weekly Avg</div><div style="font-size:22px;font-weight:700;color:var(--gray-900);margin-top:4px;">\${fmt((fixedTotal+onetimeTotal)/4.33)}</div></div>
+        </div>
+      </div>
+    </div>
+  \`
 }
 
-async function toggleFixed(id, active) {
-  const item = state.overheadFixed.find(i => i.id === id)
+async function changeOnetimeMonth(m) {
+  state.currentMonth = m
+  await renderOverhead()
+}
+
+async function toggleFixed(id, newActive, el) {
+  const item = state.overheadFixed.find(f=>f.id===id)
   if (!item) return
   try {
-    await api('PUT', '/overhead/fixed/' + id, { ...item, active: active ? 1 : 0 })
-    item.active = active ? 1 : 0
-    renderFixedList()
-    updateOverheadSummary()
-  } catch(e) { showToast('Error', 'error') }
+    await api('/overhead/fixed/' + id, { method:'PUT', body: JSON.stringify({...item, active: newActive}) })
+    await renderOverhead()
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
+}
+
+function openFixedModal(item=null) {
+  const mc = document.getElementById('modal-container')
+  mc.innerHTML = \`
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">\${item?'Edit Fixed Item':'Add Fixed Item'}</div>
+          <button class="btn-icon" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom:16px;">
+            <label>Item Name</label>
+            <input type="text" id="m-fixed-name" value="\${item?.name||''}" placeholder="e.g. Rent, Insurance..." />
+          </div>
+          <div class="form-group">
+            <label>Monthly Amount</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="m-fixed-amount" step="0.01" min="0" value="\${item?.amount||''}" placeholder="0.00" /></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveFixed(\${item?.id||'null'})"><i class="fas fa-save"></i> Save</button>
+        </div>
+      </div>
+    </div>\`
+}
+
+async function editFixed(id) {
+  const item = state.overheadFixed.find(f=>f.id===id)
+  openFixedModal(item)
+}
+
+async function saveFixed(id) {
+  const name = document.getElementById('m-fixed-name').value.trim()
+  const amount = +document.getElementById('m-fixed-amount').value || 0
+  if (!name) { showToast('Please enter a name.', 'error'); return }
+  try {
+    if (id && id !== 'null') {
+      const item = state.overheadFixed.find(f=>f.id===id)
+      await api('/overhead/fixed/' + id, { method:'PUT', body: JSON.stringify({...item, name, amount}) })
+    } else {
+      await api('/overhead/fixed', { method:'POST', body: JSON.stringify({name, amount}) })
+    }
+    closeModal()
+    showToast('Saved!')
+    await renderOverhead()
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
 }
 
 async function deleteFixed(id) {
-  if (!confirm('Delete this item?')) return
+  if (!confirm('Delete this fixed item?')) return
   try {
-    await api('DELETE', '/overhead/fixed/' + id)
-    state.overheadFixed = state.overheadFixed.filter(i => i.id !== id)
-    renderFixedList()
-    updateOverheadSummary()
-    showToast('Deleted', 'success')
-  } catch(e) { showToast('Error', 'error') }
+    await api('/overhead/fixed/' + id, { method:'DELETE' })
+    showToast('Deleted.')
+    await renderOverhead()
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
 }
 
-document.getElementById('add-fixed-btn').addEventListener('click', async () => {
-  const name = document.getElementById('new-fixed-name').value.trim()
-  const amount = parseFloat(document.getElementById('new-fixed-amount').value) || 0
-  if (!name) { showToast('Enter item name', 'error'); return }
-  try {
-    const item = await api('POST', '/overhead/fixed', { name, amount, active: 1 })
-    state.overheadFixed.push(item)
-    renderFixedList()
-    updateOverheadSummary()
-    document.getElementById('new-fixed-name').value = ''
-    document.getElementById('new-fixed-amount').value = ''
-    showToast('Item added', 'success')
-  } catch(e) { showToast('Error', 'error') }
-})
-
-async function loadOnetimeOverhead() {
-  const month = document.getElementById('onetime-month-picker').value || getMonthStr()
-  try {
-    const items = await api('GET', '/overhead/onetime?month=' + month)
-    state.overheadOnetime = items
-    renderOnetimeList()
-  } catch(e) {}
+function openOnetimeModal(item=null) {
+  const mc = document.getElementById('modal-container')
+  mc.innerHTML = \`
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">\${item?'Edit One-Time Item':'Add One-Time Item'}</div>
+          <button class="btn-icon" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom:16px;">
+            <label>Month</label>
+            <input type="month" id="m-ot-month" value="\${item?.month||state.currentMonth}" />
+          </div>
+          <div class="form-group" style="margin-bottom:16px;">
+            <label>Item Name</label>
+            <input type="text" id="m-ot-name" value="\${item?.name||''}" placeholder="e.g. Equipment repair..." />
+          </div>
+          <div class="form-group">
+            <label>Amount</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="m-ot-amount" step="0.01" min="0" value="\${item?.amount||''}" placeholder="0.00" /></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveOnetime(\${item?.id||'null'})"><i class="fas fa-save"></i> Save</button>
+        </div>
+      </div>
+    </div>\`
 }
 
-document.getElementById('onetime-month-picker').addEventListener('change', async () => {
-  await loadOnetimeOverhead()
-  updateOverheadSummary()
-})
-
-function renderOnetimeList() {
-  const el = document.getElementById('onetime-oh-list')
-  if (!state.overheadOnetime.length) {
-    el.innerHTML = '<div class="empty-state"><i class="fas fa-receipt"></i><p>No one-time items this month</p></div>'
-    document.getElementById('onetime-oh-total').textContent = '$0.00'
-    return
-  }
-  el.innerHTML = state.overheadOnetime.map(item => \`
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f3f4f6">
-      <span style="flex:1;font-size:14px;color:#111827">\${item.name}</span>
-      <span style="font-size:14px;font-weight:600;color:#374151">\${fmt$d(item.amount)}</span>
-      <button class="btn btn-danger btn-icon btn-sm" onclick="deleteOnetime(\${item.id})"><i class="fas fa-trash"></i></button>
-    </div>
-  \`).join('')
-  const total = state.overheadOnetime.reduce((s, i) => s + i.amount, 0)
-  document.getElementById('onetime-oh-total').textContent = fmt$d(total)
+async function editOnetime(id) {
+  const item = state.overheadOnetime.find(f=>f.id===id)
+  openOnetimeModal(item)
 }
 
-document.getElementById('add-ot-btn').addEventListener('click', async () => {
-  const name = document.getElementById('new-ot-name').value.trim()
-  const amount = parseFloat(document.getElementById('new-ot-amount').value) || 0
-  const month = document.getElementById('onetime-month-picker').value || getMonthStr()
-  if (!name) { showToast('Enter item name', 'error'); return }
+async function saveOnetime(id) {
+  const month = document.getElementById('m-ot-month').value
+  const name = document.getElementById('m-ot-name').value.trim()
+  const amount = +document.getElementById('m-ot-amount').value || 0
+  if (!name) { showToast('Please enter a name.', 'error'); return }
+  if (!month) { showToast('Please select a month.', 'error'); return }
   try {
-    const item = await api('POST', '/overhead/onetime', { month, name, amount })
-    state.overheadOnetime.push(item)
-    renderOnetimeList()
-    updateOverheadSummary()
-    document.getElementById('new-ot-name').value = ''
-    document.getElementById('new-ot-amount').value = ''
-    showToast('Item added', 'success')
-  } catch(e) { showToast('Error', 'error') }
-})
+    if (id && id !== 'null') {
+      await api('/overhead/onetime/' + id, { method:'PUT', body: JSON.stringify({month, name, amount}) })
+    } else {
+      await api('/overhead/onetime', { method:'POST', body: JSON.stringify({month, name, amount}) })
+    }
+    closeModal()
+    showToast('Saved!')
+    await renderOverhead()
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
+}
 
 async function deleteOnetime(id) {
   if (!confirm('Delete this item?')) return
   try {
-    await api('DELETE', '/overhead/onetime/' + id)
-    state.overheadOnetime = state.overheadOnetime.filter(i => i.id !== id)
-    renderOnetimeList()
-    updateOverheadSummary()
-    showToast('Deleted', 'success')
-  } catch(e) { showToast('Error', 'error') }
+    await api('/overhead/onetime/' + id, { method:'DELETE' })
+    showToast('Deleted.')
+    await renderOverhead()
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
 }
 
-function updateOverheadSummary() {
-  const fixed = state.overheadFixed.filter(i => i.active).reduce((s,i) => s+i.amount, 0)
-  const onetime = state.overheadOnetime.reduce((s,i) => s+i.amount, 0)
-  const total = fixed + onetime
-  const weekly = total / 4.33
-  document.getElementById('summ-fixed').textContent = fmt$d(fixed)
-  document.getElementById('summ-onetime').textContent = fmt$d(onetime)
-  document.getElementById('summ-total').textContent = fmt$d(total)
-  document.getElementById('summ-weekly').textContent = fmt$d(weekly)
-}
+// =====================================================================
+// HISTORY VIEW
+// =====================================================================
+let historySearch = ''
 
-// ======================================================
-// HISTORY
-// ======================================================
-async function loadHistory() {
-  try {
-    const weeks = await api('GET', '/weeks')
-    state.historyRaw = weeks
-    renderHistoryTable(weeks)
-  } catch(e) { showToast('Failed to load history', 'error') }
-}
+async function renderHistory() {
+  const [weeks, settings] = await Promise.all([api('/weeks'), api('/settings')])
+  state.weeks = weeks
+  state.settings = settings
 
-function renderHistoryTable(rows) {
-  const tbody = document.getElementById('history-tbody')
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><i class="fas fa-history"></i><p>No entries yet</p></div></td></tr>'
-    return
-  }
-  tbody.innerHTML = rows.map(w => {
-    const kpi = calcKPIs(w)
-    const s = state.settings || {}
-    const nrColor = kpiColor(kpi.nr_labor_ratio, s.nr_labor_target || 2.0)
-    const gpColor = kpiColor(kpi.gp_pct, s.gp_pct_target || 40)
+  const filtered = weeks.filter(w =>
+    !historySearch ||
+    w.week_start?.includes(historySearch) ||
+    (w.notes||'').toLowerCase().includes(historySearch.toLowerCase())
+  )
+
+  const rows = filtered.length ? filtered.map(w => {
+    const kpi = calcKPIs(w, 0)
+    const ratioColor = kpiColor(kpi.nrLaborRatio, settings.nr_labor_target, true)
+    const gpColor = kpiColor(kpi.gpPct, settings.gp_pct_target, true)
     return \`<tr>
-      <td style="font-weight:600">\${fmtDate(w.week_start)}</td>
-      <td>\${fmt$(w.gross_revenue)}</td>
-      <td>\${fmt$(kpi.net_revenue)}</td>
-      <td><span class="badge \${nrColor}">\${fmtX(kpi.nr_labor_ratio)}</span></td>
-      <td><span class="badge \${gpColor}">\${fmtPct(kpi.gp_pct)}</span></td>
-      <td>\${Number(w.direct_labor_hours).toFixed(1)}</td>
-      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280">\${w.notes || '—'}</td>
+      <td style="font-weight:600;">\${w.week_start}</td>
+      <td>\${fmt(w.gross_revenue)}</td>
+      <td>\${fmt(kpi.nr)}</td>
+      <td>\${fmt(kpi.gp)}</td>
+      <td><span class="badge badge-\${gpColor}">\${fmtPct(kpi.gpPct)}</span></td>
+      <td><span class="badge badge-\${ratioColor}">\${fmtX(kpi.nrLaborRatio)}</span></td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="\${w.notes||''}">\${w.notes||'—'}</td>
       <td>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-secondary btn-icon btn-sm" onclick="editEntry(\${w.id})" title="Edit">
-            <i class="fas fa-edit"></i>
-          </button>
-          <button class="btn btn-danger btn-icon btn-sm" onclick="deleteEntry(\${w.id})" title="Delete">
-            <i class="fas fa-trash"></i>
-          </button>
+        <div class="td-actions">
+          <button class="btn-icon" title="Edit" onclick="editWeek(\${w.id})"><i class="fas fa-pen"></i></button>
+          <button class="btn-icon danger" title="Delete" onclick="deleteWeek(\${w.id})"><i class="fas fa-trash"></i></button>
         </div>
       </td>
     </tr>\`
-  }).join('')
+  }).join('') : \`<tr><td colspan="8"><div class="empty-state" style="padding:28px;"><i class="fas fa-search" style="font-size:24px;"></i><p>\${historySearch?'No results found.':'No entries yet.'}</p></div></td></tr>\`
+
+  document.getElementById('page-body').innerHTML = \`
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-history" style="color:var(--accent);margin-right:6px;"></i>All Weekly Entries (\${weeks.length})</div>
+        <div class="search-wrap" style="width:240px;">
+          <i class="fas fa-search"></i>
+          <input type="text" placeholder="Search by date or notes..." value="\${historySearch}" oninput="historySearch=this.value;renderHistory()" />
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Week Start</th><th>Gross Rev</th><th>Net Rev</th><th>Gross Profit</th><th>GP%</th><th>NR/Labor</th><th>Notes</th><th></th>
+            </tr>
+          </thead>
+          <tbody>\${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  \`
 }
 
-document.getElementById('history-search').addEventListener('input', function() {
-  const q = this.value.toLowerCase()
-  const filtered = state.historyRaw.filter(w =>
-    (w.week_start || '').includes(q) ||
-    (w.notes || '').toLowerCase().includes(q)
-  )
-  renderHistoryTable(filtered)
-})
+async function editWeek(id) {
+  const entry = await api('/weeks/' + id)
+  navigate('entry')
+  renderEntry(entry)
+}
 
-document.getElementById('history-refresh-btn').addEventListener('click', loadHistory)
-
-async function deleteEntry(id) {
-  if (!confirm('Delete this entry? This cannot be undone.')) return
+async function deleteWeek(id) {
+  if (!confirm('Delete this weekly entry? This cannot be undone.')) return
   try {
-    await api('DELETE', '/weeks/' + id)
-    state.historyRaw = state.historyRaw.filter(w => w.id !== id)
-    renderHistoryTable(state.historyRaw)
-    showToast('Entry deleted', 'success')
-  } catch(e) { showToast('Error deleting entry', 'error') }
+    await api('/weeks/' + id, { method: 'DELETE' })
+    showToast('Entry deleted.')
+    if (state.selectedWeekId === id) state.selectedWeekId = null
+    await renderHistory()
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
 }
 
-function editEntry(id) {
-  const entry = state.historyRaw.find(w => w.id === id)
-  if (!entry) return
-  // Populate the weekly entry form and switch view
-  document.getElementById('entry-id').value = entry.id
-  document.getElementById('f-week-start').value = entry.week_start
-  document.getElementById('f-notes').value = entry.notes || ''
-  document.getElementById('f-gross-revenue').value = entry.gross_revenue
-  document.getElementById('f-cogs').value = entry.cogs
-  document.getElementById('f-dl-wages').value = entry.direct_labor_wages
-  document.getElementById('f-dl-hours').value = entry.direct_labor_hours
-  document.getElementById('f-il-wages').value = entry.indirect_labor_wages
-  document.getElementById('f-il-hours').value = entry.indirect_labor_hours
-  document.getElementById('f-add-benefits').value = entry.additional_benefits
-  document.getElementById('f-labor-burden').value = entry.labor_burden
-  document.getElementById('f-burden-display').textContent = fmt$d(entry.labor_burden)
-  document.getElementById('entry-submit-btn').innerHTML = '<i class="fas fa-save"></i> Update Entry'
-  updateLivePreview()
-  navigateTo('entry')
+// =====================================================================
+// SETTINGS VIEW
+// =====================================================================
+async function renderSettings() {
+  const s = await api('/settings')
+  state.settings = s
+
+  document.getElementById('page-body').innerHTML = \`
+    <div class="card" style="max-width:680px;">
+      <div class="card-header">
+        <div class="card-title"><i class="fas fa-cog" style="color:var(--accent);margin-right:6px;"></i>Application Settings</div>
+      </div>
+      <div class="card-body">
+
+        <div class="settings-section">
+          <div class="settings-section-title">Business</div>
+          <div class="settings-grid">
+            <div class="form-group full">
+              <label>Business Name</label>
+              <input type="text" id="s-biz-name" value="\${s.business_name||''}" placeholder="Your Business Name" />
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Labor Burden Rates</div>
+          <div class="section-sub" style="margin-bottom:14px;">These rates are applied to total wages to auto-calculate labor burden in Weekly Entry.</div>
+          <div class="settings-grid">
+            <div class="form-group">
+              <label>Payroll Tax %</label>
+              <div class="input-suffix"><span>%</span><input type="number" id="s-pt" step="0.01" min="0" max="100" value="\${s.payroll_tax_pct}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">Default: 7.65%</span>
+            </div>
+            <div class="form-group">
+              <label>Workers' Comp %</label>
+              <div class="input-suffix"><span>%</span><input type="number" id="s-wc" step="0.01" min="0" max="100" value="\${s.workers_comp_pct}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">Default: 4.00%</span>
+            </div>
+            <div class="form-group">
+              <label>FL Reemployment Tax %</label>
+              <div class="input-suffix"><span>%</span><input type="number" id="s-fl" step="0.01" min="0" max="100" value="\${s.fl_reemployment_pct}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">Default: 0.50%</span>
+            </div>
+            <div class="form-group">
+              <label>Other Burden %</label>
+              <div class="input-suffix"><span>%</span><input type="number" id="s-ob" step="0.01" min="0" max="100" value="\${s.other_burden_pct}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">Default: 0.00%</span>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding:12px 16px;background:var(--accent-light);border-radius:8px;font-size:13px;color:var(--gray-700);">
+            <strong>Total Burden Rate:</strong> <span id="total-burden-rate"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">KPI Targets</div>
+          <div class="section-sub" style="margin-bottom:14px;">Used for color-coding KPI cards (green/yellow/red).</div>
+          <div class="settings-grid">
+            <div class="form-group">
+              <label>NR / Labor Cost Target</label>
+              <div class="input-suffix"><span>x</span><input type="number" id="s-nrl" step="0.1" min="0" value="\${s.nr_labor_target}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">Default: 2.0x</span>
+            </div>
+            <div class="form-group">
+              <label>Gross Profit % Target</label>
+              <div class="input-suffix"><span>%</span><input type="number" id="s-gp" step="0.1" min="0" max="100" value="\${s.gp_pct_target}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">Default: 40%</span>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" onclick="saveSettings()">
+          <i class="fas fa-save"></i> Save Settings
+        </button>
+      </div>
+    </div>
+  \`
+
+  // Live total burden rate
+  const updateRate = () => {
+    const t = (+document.getElementById('s-pt').value||0) +
+              (+document.getElementById('s-wc').value||0) +
+              (+document.getElementById('s-fl').value||0) +
+              (+document.getElementById('s-ob').value||0)
+    const el = document.getElementById('total-burden-rate')
+    if (el) el.textContent = t.toFixed(2) + '%'
+  }
+  updateRate()
+  ;['s-pt','s-wc','s-fl','s-ob'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', updateRate)
+  })
 }
 
-function closeEditModal() {
-  document.getElementById('edit-modal').classList.remove('open')
+async function saveSettings() {
+  const body = {
+    business_name: document.getElementById('s-biz-name').value,
+    payroll_tax_pct: +document.getElementById('s-pt').value || 0,
+    workers_comp_pct: +document.getElementById('s-wc').value || 0,
+    fl_reemployment_pct: +document.getElementById('s-fl').value || 0,
+    other_burden_pct: +document.getElementById('s-ob').value || 0,
+    nr_labor_target: +document.getElementById('s-nrl').value || 2.0,
+    gp_pct_target: +document.getElementById('s-gp').value || 40.0
+  }
+  try {
+    state.settings = await api('/settings', { method:'PUT', body: JSON.stringify(body) })
+    document.getElementById('business-name-display').textContent = state.settings.business_name
+    showToast('Settings saved!')
+  } catch(e) { showToast('Error: ' + e.message, 'error') }
 }
 
-// ======================================================
+// =====================================================================
+// MODAL HELPERS
+// =====================================================================
+function closeModal() {
+  document.getElementById('modal-container').innerHTML = ''
+}
+
+// =====================================================================
 // INIT
-// ======================================================
+// =====================================================================
 async function init() {
   try {
-    state.settings = await api('GET', '/settings')
-    document.getElementById('sidebar-biz-name').textContent = state.settings?.business_name || 'NuWave Composites'
+    state.settings = await api('/settings')
+    document.getElementById('business-name-display').textContent = state.settings?.business_name || 'NuWave Composites'
   } catch(e) {}
-  loadDashboard()
+  navigate('dashboard')
 }
 
 init()
