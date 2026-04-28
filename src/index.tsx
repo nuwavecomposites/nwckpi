@@ -1095,7 +1095,7 @@ async function renderHistory() {
       <td>\${fmt(w.gross_revenue)}</td>
       <td>\${fmt(kpi.nr)}</td>
       <td>\${fmt(kpi.gp)}</td>
-      <td><span class="badge badge-\${gpColor}">\${fmtPct(kpi.gpPct)}</span></td>
+      <td><span class="badge badge-\${gpColor}">\${fmt(kpi.gp)} <span style="font-weight:400;opacity:.7;">\${fmtPct(kpi.gpPct)}</span></span></td>
       <td><span class="badge badge-\${ratioColor}">\${fmtX(kpi.nrLaborRatio)}</span></td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="\${w.notes||''}">\${w.notes||'—'}</td>
       <td>
