@@ -963,9 +963,13 @@ function openFixedModal(item=null) {
             <label>Item Name</label>
             <input type="text" id="m-fixed-name" value="\${item?.name||''}" placeholder="e.g. Rent, Insurance..." />
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom:16px;">
             <label>Monthly Amount</label>
             <div class="input-prefix"><span>$</span><input type="number" id="m-fixed-amount" step="0.01" min="0" value="\${item?.amount||''}" placeholder="0.00" /></div>
+          </div>
+          <div class="form-group">
+            <label>Notes <span style="font-weight:400;color:var(--gray-400);">(optional)</span></label>
+            <input type="text" id="m-fixed-notes" value="\${item?.notes||''}" placeholder="e.g. TECO - Power, General liability..." />
           </div>
         </div>
         <div class="modal-footer">
@@ -984,13 +988,14 @@ async function editFixed(id) {
 async function saveFixed(id) {
   const name = document.getElementById('m-fixed-name').value.trim()
   const amount = +document.getElementById('m-fixed-amount').value || 0
+  const notes = document.getElementById('m-fixed-notes').value.trim()
   if (!name) { showToast('Please enter a name.', 'error'); return }
   try {
     if (id && id !== 'null') {
       const item = state.overheadFixed.find(f=>f.id===id)
-      await api('/overhead/fixed/' + id, { method:'PUT', body: JSON.stringify({...item, name, amount}) })
+      await api('/overhead/fixed/' + id, { method:'PUT', body: JSON.stringify({...item, name, amount, notes}) })
     } else {
-      await api('/overhead/fixed', { method:'POST', body: JSON.stringify({name, amount}) })
+      await api('/overhead/fixed', { method:'POST', body: JSON.stringify({name, amount, notes}) })
     }
     closeModal()
     showToast('Saved!')
