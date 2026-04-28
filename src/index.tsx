@@ -833,7 +833,10 @@ async function renderOverhead() {
 
   const fixedRows = fixed.length ? fixed.map(item => \`
     <tr>
-      <td>\${item.name}</td>
+      <td>
+        <div style="font-weight:600;">\${item.name}</div>
+        \${item.notes ? \`<div style="font-size:11px;color:var(--gray-400);margin-top:2px;">\${item.notes}</div>\` : ''}
+      </td>
       <td>\${fmt(item.amount)}</td>
       <td>
         <div class="toggle \${item.active?'on':''}" onclick="toggleFixed(\${item.id},\${item.active?0:1},this)">

@@ -15,8 +15,8 @@ overhead.get('/fixed', async (c) => {
 overhead.post('/fixed', async (c) => {
   const body = await c.req.json()
   const result = await c.env.DB.prepare(
-    'INSERT INTO overhead_fixed (name, amount, active) VALUES (?, ?, ?)'
-  ).bind(body.name, body.amount ?? 0, body.active ?? 1).run()
+    'INSERT INTO overhead_fixed (name, amount, active, notes) VALUES (?, ?, ?, ?)'
+  ).bind(body.name, body.amount ?? 0, body.active ?? 1, body.notes ?? '').run()
   const row = await c.env.DB.prepare(
     'SELECT * FROM overhead_fixed WHERE id = ?'
   ).bind(result.meta.last_row_id).first()
@@ -27,8 +27,8 @@ overhead.put('/fixed/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json()
   await c.env.DB.prepare(
-    'UPDATE overhead_fixed SET name = ?, amount = ?, active = ? WHERE id = ?'
-  ).bind(body.name, body.amount ?? 0, body.active ?? 1, id).run()
+    'UPDATE overhead_fixed SET name = ?, amount = ?, active = ?, notes = ? WHERE id = ?'
+  ).bind(body.name, body.amount ?? 0, body.active ?? 1, body.notes ?? '', id).run()
   const row = await c.env.DB.prepare(
     'SELECT * FROM overhead_fixed WHERE id = ?'
   ).bind(id).first()
