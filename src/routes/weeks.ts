@@ -26,16 +26,17 @@ weeks.post('/', async (c) => {
   const body = await c.req.json()
   const result = await c.env.DB.prepare(`
     INSERT INTO weekly_entries
-      (week_start, notes, gross_revenue, cogs,
+      (week_start, notes, gross_revenue, materials, subcontractors,
        direct_labor_wages, direct_labor_hours,
        indirect_labor_wages, indirect_labor_hours,
        labor_burden, additional_benefits)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     body.week_start,
     body.notes ?? '',
     body.gross_revenue ?? 0,
-    body.cogs ?? 0,
+    body.materials ?? 0,
+    body.subcontractors ?? 0,
     body.direct_labor_wages ?? 0,
     body.direct_labor_hours ?? 0,
     body.indirect_labor_wages ?? 0,
@@ -58,7 +59,8 @@ weeks.put('/:id', async (c) => {
       week_start = ?,
       notes = ?,
       gross_revenue = ?,
-      cogs = ?,
+      materials = ?,
+      subcontractors = ?,
       direct_labor_wages = ?,
       direct_labor_hours = ?,
       indirect_labor_wages = ?,
@@ -71,7 +73,8 @@ weeks.put('/:id', async (c) => {
     body.week_start,
     body.notes ?? '',
     body.gross_revenue ?? 0,
-    body.cogs ?? 0,
+    body.materials ?? 0,
+    body.subcontractors ?? 0,
     body.direct_labor_wages ?? 0,
     body.direct_labor_hours ?? 0,
     body.indirect_labor_wages ?? 0,

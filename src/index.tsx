@@ -373,26 +373,64 @@ function getWeekMonth(weekStart) {
 // =====================================================================
 // KPI CALCULATIONS
 // =====================================================================
-function calcKPIs(entry, overheadTotal) {
-  const gr = +entry.gross_revenue || 0
-  const cogs = +entry.cogs || 0
-  const dlw = +entry.direct_labor_wages || 0
-  const ilw = +entry.indirect_labor_wages || 0
-  const burden = +entry.labor_burden || 0
-  const benefits = +entry.additional_benefits || 0
-  const dlh = +entry.direct_labor_hours || 0
-  const oh = overheadTotal || 0
+//  NR          = Gross Revenue – Materials – Subcontractors
+//  DL Cost     = DL Wages + (DL share of burden) + Benefits  ← fully burdened
+//  GP $        = NR – DL Cost
+//  GP %        = GP $ / NR
+//  NR/DL Ratio = NR / DL Cost                               ← primary KPI
+//  IL Cost     = IL Wages + (IL share of burden)
+//  OH (weekly) = IL Cost + Fixed Overhead
+//  NP          = NR – DL Cost – OH
+function calcKPIs(entry, fixedOHTotal) {
+  const gr       = +entry.gross_revenue        || 0
+  const mats     = +entry.materials            || 0
+  const subs     = +entry.subcontractors       || 0
+  const legacyCogs = +entry.cogs               || 0  // backwards compat
+  const dlw      = +entry.direct_labor_wages   || 0
+  const ilw      = +entry.indirect_labor_wages || 0
+  const burden   = +entry.labor_burden         || 0
+  const benefits = +entry.additional_benefits  || 0
+  const dlh      = +entry.direct_labor_hours   || 0
 
-  const nr = gr - cogs
-  const totalLabor = dlw + ilw + burden + benefits
-  const gp = nr - totalLabor
+  // NR = Revenue – Materials – Subcontractors (no labor in deduction)
+  const totalDirect = (mats + subs) > 0 ? (mats + subs) : legacyCogs
+  const nr = gr - totalDirect
+
+  // Burden split proportionally by wage share
+  const totalWages = dlw + ilw
+  const dlBurden = totalWages > 0 ? burden * (dlw / totalWages) : burden
+  const ilBurden = totalWages > 0 ? burden * (ilw / totalWages) : 0
+
+  // Direct Labor Cost (fully burdened) = DL wages + DL burden share + benefits
+  const dlCost = dlw + dlBurden + benefits
+
+  // Gross Profit = NR – Direct Labor Cost only (indirect excluded)
+  const gp    = nr - dlCost
   const gpPct = nr > 0 ? (gp / nr) * 100 : 0
-  const nrLaborRatio = totalLabor > 0 ? nr / totalLabor : 0
-  const np = gp - oh
+
+  // Primary KPI: NR ÷ DL Cost
+  const nrLaborRatio = dlCost > 0 ? nr / dlCost : 0
+
+  // Indirect labor cost (for overhead)
+  const ilCost = ilw + ilBurden
+
+  // Weekly Overhead = Indirect Labor Cost + Fixed Overhead
+  const fixedOH = fixedOHTotal || 0
+  const oh = ilCost + fixedOH
+
+  // Net Profit = NR – DL Cost – Overhead
+  const np    = nr - dlCost - oh
   const npPct = nr > 0 ? (np / nr) * 100 : 0
+
+  // NR per Direct Hour (direct hours only)
   const nrPerHour = dlh > 0 ? nr / dlh : 0
 
-  return { gr, cogs, nr, totalLabor, dlw, ilw, burden, benefits, dlh, gp, gpPct, nrLaborRatio, oh, np, npPct, nrPerHour }
+  // Total labor (informational)
+  const totalLabor = dlCost + ilCost
+
+  return { gr, mats, subs, nr, dlw, ilw, dlBurden, ilBurden, ilCost,
+           burden, benefits, dlh, dlCost, gp, gpPct, nrLaborRatio,
+           fixedOH, oh, np, npPct, nrPerHour, totalLabor }
 }
 
 function calcBurden(wages, s) {
@@ -490,9 +528,10 @@ async function renderDashboard() {
 
   const kpi = calcKPIs(selected, weeklyOH)
   const s = settings
-  const nrlColor = kpiColor(kpi.nrLaborRatio, s.nr_labor_target, true)
-  const gpColor = kpiColor(kpi.gpPct, s.gp_pct_target, true)
-  const npColor = kpi.np >= 0 ? 'green' : 'red'
+  const nrlColor  = kpiColor(kpi.nrLaborRatio, s.nr_labor_target, true)
+  const gpColor   = kpiColor(kpi.gpPct, s.gp_pct_target, true)
+  const gpDollarColor = kpi.gp >= 0 ? 'green' : 'red'
+  const npColor   = kpi.np >= 0 ? 'green' : 'red'
 
   const pillsHTML = weeks.slice(0, 10).map(w => \`
     <div class="week-pill\${w.id===state.selectedWeekId?' active':''}" data-wid="\${w.id}">
@@ -503,54 +542,72 @@ async function renderDashboard() {
     <div class="week-pills" id="week-pills">\${pillsHTML}</div>
 
     <div class="kpi-grid">
+
+      <!-- 1. Net Revenue -->
       <div class="kpi-card neutral">
-        <div class="kpi-label">Net Revenue</div>
+        <div class="kpi-label">1 · Net Revenue</div>
         <div class="kpi-value">\${fmt(kpi.nr)}</div>
-        <div class="kpi-sub">Gross \${fmt(kpi.gr)} − COGS \${fmt(kpi.cogs)}</div>
+        <div class="kpi-sub">Revenue \${fmt(kpi.gr)} − Mats \${fmt(kpi.mats)} − Subs \${fmt(kpi.subs)}</div>
       </div>
+
+      <!-- 2. NR / Direct Labor (fully burdened) -->
       <div class="kpi-card \${nrlColor}">
-        <div class="kpi-label">NR / Labor Cost</div>
+        <div class="kpi-label">2 · NR / Direct Labor ⭐</div>
         <div class="kpi-value">\${fmtX(kpi.nrLaborRatio)}</div>
-        <div class="kpi-sub">Target: \${fmtX(s.nr_labor_target)}</div>
+        <div class="kpi-sub">DL Cost \${fmt(kpi.dlCost)} · Target \${fmtX(s.nr_labor_target)}</div>
         <div class="kpi-badge \${nrlColor}"><i class="fas fa-\${nrlColor==='green'?'check':'exclamation'}-circle"></i> \${nrlColor==='green'?'On Target':nrlColor==='yellow'?'Near Target':'Below Target'}</div>
       </div>
-      <div class="kpi-card \${gpColor}">
-        <div class="kpi-label">Gross Profit</div>
+
+      <!-- 3a. Gross Profit $ -->
+      <div class="kpi-card \${gpDollarColor}">
+        <div class="kpi-label">3 · Gross Profit $</div>
         <div class="kpi-value">\${fmt(kpi.gp)}</div>
-        <div class="kpi-sub">\${fmtPct(kpi.gpPct)} GP% (target \${fmtPct(s.gp_pct_target)})</div>
-        <div class="kpi-badge \${gpColor}"><i class="fas fa-\${gpColor==='green'?'check':'exclamation'}-circle"></i> \${fmtPct(kpi.gpPct)}</div>
+        <div class="kpi-sub">NR \${fmt(kpi.nr)} − DL Cost \${fmt(kpi.dlCost)}</div>
+        <div class="kpi-badge \${gpDollarColor}"><i class="fas fa-arrow-\${gpDollarColor==='green'?'up':'down'}"></i> Scale indicator</div>
       </div>
+
+      <!-- 3b. Gross Profit % -->
+      <div class="kpi-card \${gpColor}">
+        <div class="kpi-label">3 · Gross Profit %</div>
+        <div class="kpi-value">\${fmtPct(kpi.gpPct)}</div>
+        <div class="kpi-sub">Target \${fmtPct(s.gp_pct_target)} · Pricing discipline</div>
+        <div class="kpi-badge \${gpColor}"><i class="fas fa-\${gpColor==='green'?'check':'exclamation'}-circle"></i> \${gpColor==='green'?'On Target':gpColor==='yellow'?'Near Target':'Below Target'}</div>
+      </div>
+
+      <!-- 4. Weekly Overhead -->
       <div class="kpi-card neutral">
-        <div class="kpi-label">Weekly Overhead</div>
-        <div class="kpi-value">\${fmt(weeklyOH)}</div>
-        <div class="kpi-sub">\${fmt(ohSummary.grand_total)}/mo ÷ 4.33</div>
+        <div class="kpi-label">4 · Weekly Overhead</div>
+        <div class="kpi-value">\${fmt(kpi.oh)}</div>
+        <div class="kpi-sub">Fixed \${fmt(weeklyOH)} + IL \${fmt(kpi.ilCost)}</div>
       </div>
+
+      <!-- 5. Net Profit -->
       <div class="kpi-card \${npColor}">
-        <div class="kpi-label">Net Profit</div>
+        <div class="kpi-label">5 · Net Profit</div>
         <div class="kpi-value">\${fmt(kpi.np)}</div>
-        <div class="kpi-sub">\${fmtPct(kpi.npPct)} NP%</div>
-        <div class="kpi-badge \${npColor}"><i class="fas fa-\${npColor==='green'?'arrow-up':'arrow-down'}"></i> \${fmtPct(kpi.npPct)}</div>
+        <div class="kpi-sub">NR − DL − Overhead · \${fmtPct(kpi.npPct)} NP%</div>
+        <div class="kpi-badge \${npColor}"><i class="fas fa-arrow-\${npColor==='green'?'up':'down'}"></i> \${fmtPct(kpi.npPct)}</div>
       </div>
+
+      <!-- 6. NR / Direct Labor Hour -->
       <div class="kpi-card neutral">
-        <div class="kpi-label">NR / Direct Hour</div>
+        <div class="kpi-label">6 · NR / Direct Labor Hour</div>
         <div class="kpi-value">\${fmt(kpi.nrPerHour)}</div>
-        <div class="kpi-sub">\${fmtHrs(kpi.dlh)} direct hours</div>
+        <div class="kpi-sub">\${fmtHrs(kpi.dlh)} direct hours only</div>
       </div>
+
+      <!-- Supporting: Direct Labor Cost breakdown -->
       <div class="kpi-card neutral">
-        <div class="kpi-label">Total Labor Cost</div>
-        <div class="kpi-value">\${fmt(kpi.totalLabor)}</div>
-        <div class="kpi-sub">DL \${fmt(kpi.dlw)} + IL \${fmt(kpi.ilw)} + Burden</div>
+        <div class="kpi-label">Direct Labor Cost</div>
+        <div class="kpi-value">\${fmt(kpi.dlCost)}</div>
+        <div class="kpi-sub">Wages \${fmt(kpi.dlw)} + Burden \${fmt(kpi.dlBurden)} + Benefits \${fmt(kpi.bens)}</div>
       </div>
-      <div class="kpi-card neutral">
-        <div class="kpi-label">Labor Burden</div>
-        <div class="kpi-value">\${fmt(kpi.burden)}</div>
-        <div class="kpi-sub">+ Benefits \${fmt(kpi.benefits)}</div>
-      </div>
+
     </div>
 
     <div class="charts-grid">
       <div class="card">
-        <div class="card-header"><div class="card-title"><i class="fas fa-chart-line" style="color:var(--accent);margin-right:6px;"></i>NR / Labor Ratio Trend</div></div>
+        <div class="card-header"><div class="card-title"><i class="fas fa-chart-line" style="color:var(--accent);margin-right:6px;"></i>NR / Direct Labor Ratio Trend</div></div>
         <div class="card-body"><div class="chart-wrap"><canvas id="chart-ratio"></canvas></div></div>
       </div>
       <div class="card">
@@ -575,7 +632,12 @@ async function renderDashboard() {
     const k = calcKPIs(w, 0)
     return +k.nrLaborRatio.toFixed(2)
   })
-  const nrs = chartWeeks.map(w => +(w.gross_revenue - w.cogs).toFixed(2))
+  const nrs = chartWeeks.map(w => {
+    const m  = +w.materials || 0
+    const sb = +w.subcontractors || 0
+    const lg = +w.cogs || 0  // legacy fallback
+    return +((+w.gross_revenue) - ((m + sb) > 0 ? (m + sb) : lg)).toFixed(2)
+  })
   const gps = chartWeeks.map(w => {
     const k = calcKPIs(w, 0)
     return +k.gp.toFixed(2)
@@ -651,15 +713,20 @@ async function renderEntry(editEntry=null) {
         </div>
 
         <hr class="divider" />
-        <div class="section-title">Revenue & COGS</div>
+        <div class="section-title">Revenue & Direct Costs</div>
+        <div class="section-sub">Net Revenue = Gross Revenue – Materials – Subcontractors</div>
         <div class="form-grid" style="margin-top:12px;">
           <div class="form-group">
             <label>Gross Revenue</label>
             <div class="input-prefix"><span>$</span><input type="number" id="f-gross-rev" step="0.01" min="0" value="\${e.gross_revenue||''}" placeholder="0.00" oninput="updatePreview()" /></div>
           </div>
           <div class="form-group">
-            <label>Cost of Goods Sold (COGS)</label>
-            <div class="input-prefix"><span>$</span><input type="number" id="f-cogs" step="0.01" min="0" value="\${e.cogs||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+            <label>Materials</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-mats" step="0.01" min="0" value="\${e.materials||''}" placeholder="0.00" oninput="updatePreview()" /></div>
+          </div>
+          <div class="form-group">
+            <label>Subcontractors</label>
+            <div class="input-prefix"><span>$</span><input type="number" id="f-subs" step="0.01" min="0" value="\${e.subcontractors||''}" placeholder="0.00" oninput="updatePreview()" /></div>
           </div>
         </div>
 
@@ -709,10 +776,10 @@ async function renderEntry(editEntry=null) {
           <h4><i class="fas fa-bolt"></i> Live KPI Preview</h4>
           <div class="kpi-preview-grid" id="kpi-preview-grid">
             <div class="kpi-prev-item"><div class="label">Net Revenue</div><div class="val" id="prev-nr">—</div></div>
-            <div class="kpi-prev-item"><div class="label">NR / Labor</div><div class="val" id="prev-ratio">—</div></div>
-            <div class="kpi-prev-item"><div class="label">Gross Profit</div><div class="val" id="prev-gp">—</div></div>
-            <div class="kpi-prev-item"><div class="label">GP%</div><div class="val" id="prev-gp-pct">—</div></div>
-            <div class="kpi-prev-item"><div class="label">Total Labor</div><div class="val" id="prev-labor">—</div></div>
+            <div class="kpi-prev-item"><div class="label">NR / Direct Labor</div><div class="val" id="prev-ratio">—</div></div>
+            <div class="kpi-prev-item"><div class="label">Gross Profit $</div><div class="val" id="prev-gp">—</div></div>
+            <div class="kpi-prev-item"><div class="label">GP %</div><div class="val" id="prev-gp-pct">—</div></div>
+            <div class="kpi-prev-item"><div class="label">DL Cost (burdened)</div><div class="val" id="prev-labor">—</div></div>
             <div class="kpi-prev-item"><div class="label">NR / Direct Hr</div><div class="val" id="prev-nrhr">—</div></div>
           </div>
         </div>
@@ -749,51 +816,53 @@ function updatePreview() {
 
   const pctTotal = (+s.payroll_tax_pct||0) + (+s.workers_comp_pct||0) + (+s.fl_reemployment_pct||0) + (+s.other_burden_pct||0)
   const breakdownEl = document.getElementById('burden-breakdown')
-  if (breakdownEl) breakdownEl.textContent = pctTotal.toFixed(2) + '% × $' + totalWages.toFixed(2) + ' wages'
+  if (breakdownEl) breakdownEl.textContent = pctTotal.toFixed(2) + '% × $' + totalWages.toFixed(2) + ' total wages'
 
   const entry = {
-    gross_revenue: +document.getElementById('f-gross-rev')?.value || 0,
-    cogs: +document.getElementById('f-cogs')?.value || 0,
-    direct_labor_wages: dlw,
-    direct_labor_hours: +document.getElementById('f-dl-hours')?.value || 0,
+    gross_revenue:        +document.getElementById('f-gross-rev')?.value || 0,
+    materials:            +document.getElementById('f-mats')?.value      || 0,
+    subcontractors:       +document.getElementById('f-subs')?.value      || 0,
+    direct_labor_wages:   dlw,
+    direct_labor_hours:   +document.getElementById('f-dl-hours')?.value  || 0,
     indirect_labor_wages: ilw,
-    indirect_labor_hours: +document.getElementById('f-il-hours')?.value || 0,
-    labor_burden: burden,
-    additional_benefits: +document.getElementById('f-benefits')?.value || 0
+    indirect_labor_hours: +document.getElementById('f-il-hours')?.value  || 0,
+    labor_burden:         burden,
+    additional_benefits:  +document.getElementById('f-benefits')?.value  || 0
   }
 
   const kpi = calcKPIs(entry, 0)
-  const target = s.nr_labor_target || 2.0
-  const gpTarget = s.gp_pct_target || 40
+  const target   = s.nr_labor_target || 2.0
+  const gpTarget = s.gp_pct_target   || 40
 
-  const ratioColor = kpiColor(kpi.nrLaborRatio, target, true)
-  const gpPctColor = kpiColor(kpi.gpPct, gpTarget, true)
+  const ratioColor = kpiColor(kpi.nrLaborRatio, target,   true)
+  const gpPctColor = kpiColor(kpi.gpPct,        gpTarget, true)
 
   const set = (id, val, cls='') => {
     const el = document.getElementById(id)
     if (el) { el.textContent = val; el.className = 'val ' + cls }
   }
-  set('prev-nr', fmt(kpi.nr))
-  set('prev-ratio', fmtX(kpi.nrLaborRatio), ratioColor)
-  set('prev-gp', fmt(kpi.gp))
+  set('prev-nr',     fmt(kpi.nr))
+  set('prev-ratio',  fmtX(kpi.nrLaborRatio), ratioColor)
+  set('prev-gp',     fmt(kpi.gp))
   set('prev-gp-pct', fmtPct(kpi.gpPct), gpPctColor)
-  set('prev-labor', fmt(kpi.totalLabor))
-  set('prev-nrhr', kpi.dlh > 0 ? fmt(kpi.nrPerHour) : '—')
+  set('prev-labor',  fmt(kpi.dlCost))
+  set('prev-nrhr',   kpi.dlh > 0 ? fmt(kpi.nrPerHour) : '—')
 }
 
 async function saveEntry() {
   const burden = +document.getElementById('f-burden')?.value || 0
   const body = {
-    week_start: document.getElementById('f-week-start').value,
-    notes: document.getElementById('f-notes').value,
-    gross_revenue: +document.getElementById('f-gross-rev').value || 0,
-    cogs: +document.getElementById('f-cogs').value || 0,
-    direct_labor_wages: +document.getElementById('f-dl-wages').value || 0,
-    direct_labor_hours: +document.getElementById('f-dl-hours').value || 0,
-    indirect_labor_wages: +document.getElementById('f-il-wages').value || 0,
-    indirect_labor_hours: +document.getElementById('f-il-hours').value || 0,
-    labor_burden: burden,
-    additional_benefits: +document.getElementById('f-benefits').value || 0
+    week_start:           document.getElementById('f-week-start').value,
+    notes:                document.getElementById('f-notes').value,
+    gross_revenue:        +document.getElementById('f-gross-rev').value || 0,
+    materials:            +document.getElementById('f-mats').value      || 0,
+    subcontractors:       +document.getElementById('f-subs').value      || 0,
+    direct_labor_wages:   +document.getElementById('f-dl-wages').value  || 0,
+    direct_labor_hours:   +document.getElementById('f-dl-hours').value  || 0,
+    indirect_labor_wages: +document.getElementById('f-il-wages').value  || 0,
+    indirect_labor_hours: +document.getElementById('f-il-hours').value  || 0,
+    labor_burden:         burden,
+    additional_benefits:  +document.getElementById('f-benefits').value  || 0
   }
 
   if (!body.week_start) { showToast('Please select a week start date.', 'error'); return }
@@ -1125,7 +1194,7 @@ async function renderHistory() {
         <table>
           <thead>
             <tr>
-              <th>Week Start</th><th>Gross Rev</th><th>Net Rev</th><th>Gross Profit</th><th>GP%</th><th>NR/Labor</th><th>Notes</th><th></th>
+              <th>Week Start</th><th>Gross Rev</th><th>Net Rev</th><th>Gross Profit $</th><th>GP%</th><th>NR/DL Ratio</th><th>Notes</th><th></th>
             </tr>
           </thead>
           <tbody>\${rows}</tbody>
