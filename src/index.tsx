@@ -188,10 +188,10 @@ function getHTML() {
     /* ── CHART CARDS GRID ── */
     .charts-8-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 16px;
     }
-    @media (max-width: 1280px) { .charts-8-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 1100px) { .charts-8-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 640px)  { .charts-8-grid { grid-template-columns: 1fr; } }
     .chart-card {
       background: var(--gray-50); border: 1px solid var(--gray-200);
@@ -209,7 +209,7 @@ function getHTML() {
       font-size: 11px; font-weight: 700; color: var(--gray-700);
     }
     .chart-card-body {
-      padding: 8px 12px 10px; position: relative; height: 180px;
+      padding: 8px 12px 10px; position: relative; height: 220px;
     }
 
     /* ── FORMS ── */
@@ -854,20 +854,22 @@ async function renderDashboard() {
 
   // ── Metric definitions ───────────────────────────────────────────────
   const metrics = [
-    { id:'nr',     label:'Net Revenue',        color:'#4f6ef7', fmt:'dollar', extract: k=>k.nr,
-      icon:'fa-dollar-sign', desc:'Rev − Mats − Subs' },
+    { id:'np',     label:'Net Profit $',       color:'#06b6d4', fmt:'dollar', extract: k=>k.np,
+      icon:'fa-coins', desc:'NR − DL − Overhead' },
+    { id:'npPct',  label:'Net Profit %',       color:'#0891b2', fmt:'pct',    extract: k=>k.npPct,
+      icon:'fa-percentage', desc:'NP ÷ NR' },
     { id:'ratio',  label:'NR / Direct Labor',  color:'#8b5cf6', fmt:'ratio',  extract: k=>k.nrLaborRatio,
       target: ()=>+s.nr_labor_target, targetLabel:'Target',
       icon:'fa-balance-scale', desc:'Primary efficiency KPI' },
+    { id:'nr',     label:'Net Revenue',        color:'#4f6ef7', fmt:'dollar', extract: k=>k.nr,
+      icon:'fa-dollar-sign', desc:'Rev − Mats − Subs' },
     { id:'gp',     label:'Gross Profit $',     color:'#22c55e', fmt:'dollar', extract: k=>k.gp,
       icon:'fa-chart-bar', desc:'NR − Direct Labor Cost' },
     { id:'gpPct',  label:'GP %',               color:'#10b981', fmt:'pct',    extract: k=>k.gpPct,
       target: ()=>+s.gp_pct_target, targetLabel:'Target %',
       icon:'fa-percent', desc:'GP ÷ NR' },
-    { id:'oh',     label:'Weekly Overhead',    color:'#f59e0b', fmt:'dollar', extract: k=>k.oh,
+    { id:'oh',     label:'Overhead Spend',     color:'#f59e0b', fmt:'dollar', extract: k=>k.oh,
       icon:'fa-building', desc:'Fixed OH + Indirect Labor' },
-    { id:'np',     label:'Net Profit',         color:'#06b6d4', fmt:'dollar', extract: k=>k.np,
-      icon:'fa-coins', desc:'NR − DL − Overhead' },
     { id:'nrhr',   label:'NR / Direct Hour',   color:'#ec4899', fmt:'hr',     extract: k=>k.nrPerHour,
       icon:'fa-clock', desc:'Revenue per billable hour' },
     { id:'dlcost', label:'Direct Labor Cost',  color:'#f97316', fmt:'dollar', extract: k=>k.dlCost,
