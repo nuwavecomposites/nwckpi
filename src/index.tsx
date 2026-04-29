@@ -959,7 +959,7 @@ async function renderDashboard() {
       \`<div class="chart-card">
         <div class="chart-card-header">
           <div class="chart-card-title">
-            <i class="fas \${m.icon}" style="color:\${m.color};"></i>\${m.label}
+            <i class="fas \${m.icon}" style="color:\${m.color};"></i>\${m.label}<span style="font-weight:400;color:var(--gray-400);font-size:10px;margin-left:5px;">(\${m.formula})</span>
           </div>
           <div class="chart-card-stat" id="chart-stat-\${m.id}"></div>
         </div>
@@ -1157,6 +1157,29 @@ async function renderEntry(editEntry=null) {
     </div>
   \`
   updatePreview()
+
+  // Auto-fetch current fixed overhead snapshot if creating a new entry
+  // (editing reuses the snapshot already saved on the entry)
+  if (!entryEditId) {
+    const weekStart = document.getElementById('f-week-start')?.value
+    const month = weekStart ? weekStart.slice(0,7) : new Date().toISOString().slice(0,7)
+    api('/overhead/summary/' + month).then(ohSummary => {
+      const snap = (ohSummary.fixed_total || 0) / 4.33
+      const el = document.getElementById('f-fixed-oh')
+      if (el) { el.value = snap.toFixed(2); updatePreview() }
+    }).catch(() => {})
+  }
+
+  // Re-fetch snapshot when week date changes (new entries only)
+  document.getElementById('f-week-start')?.addEventListener('change', function() {
+    if (entryEditId) return
+    const month = this.value ? this.value.slice(0,7) : new Date().toISOString().slice(0,7)
+    api('/overhead/summary/' + month).then(ohSummary => {
+      const snap = (ohSummary.fixed_total || 0) / 4.33
+      const el = document.getElementById('f-fixed-oh')
+      if (el) { el.value = snap.toFixed(2); updatePreview() }
+    }).catch(() => {})
+  })
 }
 
 function getMonday(d) {

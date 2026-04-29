@@ -29,8 +29,8 @@ weeks.post('/', async (c) => {
       (week_start, notes, gross_revenue, materials, subcontractors,
        direct_labor_wages, direct_labor_hours,
        indirect_labor_wages, indirect_labor_hours,
-       labor_burden, additional_benefits)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       labor_burden, additional_benefits, fixed_overhead_snapshot)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     body.week_start,
     body.notes ?? '',
@@ -42,7 +42,8 @@ weeks.post('/', async (c) => {
     body.indirect_labor_wages ?? 0,
     body.indirect_labor_hours ?? 0,
     body.labor_burden ?? 0,
-    body.additional_benefits ?? 0
+    body.additional_benefits ?? 0,
+    body.fixed_overhead_snapshot ?? 0
   ).run()
   const row = await c.env.DB.prepare(
     'SELECT * FROM weekly_entries WHERE id = ?'
@@ -67,6 +68,7 @@ weeks.put('/:id', async (c) => {
       indirect_labor_hours = ?,
       labor_burden = ?,
       additional_benefits = ?,
+      fixed_overhead_snapshot = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
@@ -81,6 +83,7 @@ weeks.put('/:id', async (c) => {
     body.indirect_labor_hours ?? 0,
     body.labor_burden ?? 0,
     body.additional_benefits ?? 0,
+    body.fixed_overhead_snapshot ?? 0,
     id
   ).run()
   const row = await c.env.DB.prepare(
