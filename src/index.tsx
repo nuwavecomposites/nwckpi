@@ -910,7 +910,7 @@ async function renderDashboard() {
     const cards = [
       { label:'Net Revenue',       val:'\$'+Math.round(totNR).toLocaleString(),     sub:\`\${n} wks · avg \$\${Math.round(totNR/n).toLocaleString()}\` },
       { label:'Gross Profit',      val:'\$'+Math.round(totGP).toLocaleString(),     sub:\`Avg GP% \${avgGpPct.toFixed(1)}%\` },
-      { label:'Net Profit',        val:'\$'+Math.round(totNP).toLocaleString(),     sub:\`\${((totNP/Math.max(totNR,1))*100).toFixed(1)}% NP%\` },
+      { label:'Net Profit',        val:'\$'+Math.round(totNP).toLocaleString(),     sub:\`avg \$\${Math.round(totNP/n).toLocaleString()} · \${((totNP/Math.max(totNR,1))*100).toFixed(1)}% NP%\` },
       { label:'Avg NR/DL Ratio',   val:avgRatio.toFixed(2)+'x',                    sub:\`Target \${(+s.nr_labor_target).toFixed(2)}x\` },
       { label:'Avg GP %',          val:avgGpPct.toFixed(1)+'%',                    sub:\`Target \${(+s.gp_pct_target).toFixed(1)}%\` },
       { label:'NR / Direct Hour',  val:'\$'+nrPerHr.toFixed(0)+'/hr',              sub:\`\${Math.round(totDLH)} total DL hrs\` },
