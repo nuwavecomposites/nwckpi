@@ -147,6 +147,71 @@ function getHTML() {
     .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
     .chart-wrap { position: relative; height: 220px; }
 
+    /* ── CHART TABS ── */
+    .chart-tabs-bar {
+      display: flex; align-items: center; gap: 0; flex-wrap: nowrap;
+      overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+    }
+    .chart-tabs-bar::-webkit-scrollbar { display: none; }
+    .chart-tabs-group {
+      display: flex; align-items: center; gap: 0;
+      background: var(--gray-100); border-radius: 8px; padding: 3px;
+      margin-right: 8px; flex-shrink: 0;
+    }
+    .chart-tabs-group-label {
+      font-size: 10px; font-weight: 700; color: var(--gray-400);
+      text-transform: uppercase; letter-spacing: .06em;
+      padding: 0 6px 0 4px; flex-shrink: 0;
+    }
+    .chart-tab {
+      padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: none; background: transparent;
+      color: var(--gray-500); transition: all .15s; white-space: nowrap;
+      font-family: inherit;
+    }
+    .chart-tab:hover { background: rgba(255,255,255,.7); color: var(--gray-700); }
+    .chart-tab.active { background: #fff; color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+
+    /* ── YTD SUMMARY STRIP ── */
+    .ytd-strip {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr));
+      gap: 10px; margin-bottom: 16px;
+    }
+    .ytd-card {
+      background: var(--gray-50); border: 1px solid var(--gray-200);
+      border-radius: 10px; padding: 10px 14px;
+    }
+    .ytd-card .ytd-label { font-size: 10px; font-weight: 700; color: var(--gray-400); text-transform: uppercase; letter-spacing: .05em; }
+    .ytd-card .ytd-val { font-size: 15px; font-weight: 700; color: var(--gray-900); margin-top: 3px; }
+    .ytd-card .ytd-sub { font-size: 10px; color: var(--gray-400); margin-top: 1px; }
+
+    /* ── CHART CARDS GRID ── */
+    .charts-8-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+    @media (max-width: 1280px) { .charts-8-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px)  { .charts-8-grid { grid-template-columns: 1fr; } }
+    .chart-card {
+      background: var(--gray-50); border: 1px solid var(--gray-200);
+      border-radius: 10px; overflow: hidden;
+    }
+    .chart-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px 8px; border-bottom: 1px solid var(--gray-100);
+    }
+    .chart-card-title {
+      font-size: 11px; font-weight: 700; color: var(--gray-600);
+      display: flex; align-items: center; gap: 5px;
+    }
+    .chart-card-stat {
+      font-size: 11px; font-weight: 700; color: var(--gray-700);
+    }
+    .chart-card-body {
+      padding: 8px 12px 10px; position: relative; height: 180px;
+    }
+
     /* ── FORMS ── */
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .form-group { display: flex; flex-direction: column; gap: 6px; }
@@ -605,19 +670,20 @@ async function renderDashboard() {
 
     </div>
 
-    <div class="charts-grid">
-      <div class="card">
-        <div class="card-header"><div class="card-title"><i class="fas fa-chart-line" style="color:var(--accent);margin-right:6px;"></i>NR / Direct Labor Ratio Trend</div></div>
-        <div class="card-body"><div class="chart-wrap"><canvas id="chart-ratio"></canvas></div></div>
+    <!-- ── CHARTS PANEL ── -->
+    <div class="card" style="margin-top:0;" id="charts-panel">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px;padding-bottom:14px;">
+        <div class="card-title"><i class="fas fa-chart-line" style="color:var(--accent);margin-right:6px;"></i>Performance Charts</div>
+        <div id="chart-range-tabs" class="chart-tabs-bar"></div>
       </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title"><i class="fas fa-chart-bar" style="color:var(--accent);margin-right:6px;"></i>Net Revenue vs Gross Profit</div></div>
-        <div class="card-body"><div class="chart-wrap"><canvas id="chart-bar"></canvas></div></div>
+      <div class="card-body" style="padding:14px 20px 20px;">
+        <div id="ytd-summary-strip"></div>
+        <div id="charts-container" class="charts-8-grid"></div>
       </div>
     </div>
   \`
 
-  // Week pill click
+  // ── Week pill click ──────────────────────────────────────────────────
   document.getElementById('week-pills').addEventListener('click', async e => {
     const pill = e.target.closest('.week-pill')
     if (!pill) return
@@ -625,51 +691,344 @@ async function renderDashboard() {
     await renderDashboard()
   })
 
-  // Build charts with last 8 weeks (oldest → newest)
-  const chartWeeks = [...weeks].reverse().slice(-8)
-  const labels = chartWeeks.map(w => formatWeekLabel(w.week_start))
-  const ratios = chartWeeks.map(w => {
-    const k = calcKPIs(w, 0)
-    return +k.nrLaborRatio.toFixed(2)
-  })
-  const nrs = chartWeeks.map(w => {
-    const k = calcKPIs(w, 0)
-    return +k.nr.toFixed(2)
-  })
-  const gps = chartWeeks.map(w => {
-    const k = calcKPIs(w, 0)
-    return +k.gp.toFixed(2)
+  // ════════════════════════════════════════════════════════════════════
+  // CHART ENGINE
+  // ════════════════════════════════════════════════════════════════════
+  if (!state.chartRange) state.chartRange = 'recent'
+
+  // All weeks sorted oldest→newest
+  const allWeeks = [...weeks].reverse()
+
+  // ── Quarter helpers ──────────────────────────────────────────────────
+  function getQuarterRange(year, q) {
+    const starts = ['01-01','04-01','07-01','10-01']
+    const ends   = ['03-31','06-30','09-30','12-31']
+    return { s: \`\${year}-\${starts[q-1]}\`, e: \`\${year}-\${ends[q-1]}\` }
+  }
+  function quarterOfDate(dateStr) {
+    const m = +dateStr.slice(5,7)
+    return Math.ceil(m/3)
+  }
+
+  // ── Detect all available years ───────────────────────────────────────
+  const availYears = [...new Set(allWeeks.map(w => w.week_start.slice(0,4)))].sort()
+  const currentYear = new Date().getFullYear().toString()
+  const displayYear = availYears.includes(currentYear) ? currentYear
+                    : (availYears[availYears.length-1] || currentYear)
+
+  // ── Build tab definitions ────────────────────────────────────────────
+  // Group 1: Quick range
+  const quickGroup = [
+    { id:'recent', label:'Last 8 Wks' }
+  ]
+  // Group 2: Current-year filters (YTD + quarters + full year)
+  const yearGroups = availYears.slice().reverse().map(yr => {
+    const tabs = []
+    if (yr === currentYear) tabs.push({ id:\`ytd_\${yr}\`, label:\`YTD\` })
+    tabs.push(
+      { id:\`q1_\${yr}\`, label:'Q1' },
+      { id:\`q2_\${yr}\`, label:'Q2' },
+      { id:\`q3_\${yr}\`, label:'Q3' },
+      { id:\`q4_\${yr}\`, label:'Q4' },
+      { id:\`year_\${yr}\`, label:\`Full \${yr}\` }
+    )
+    return { year: yr, tabs }
   })
 
-  // Ratio trend line
-  new Chart(document.getElementById('chart-ratio'), {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'NR/Labor', data: ratios, borderColor: '#4f6ef7',
-        backgroundColor: 'rgba(79,110,247,.08)', fill: true,
-        tension: .3, pointBackgroundColor: '#4f6ef7', pointRadius: 4
-      }, {
-        label: 'Target', data: chartWeeks.map(()=>s.nr_labor_target),
-        borderColor: '#22c55e', borderDash: [5,4], pointRadius: 0, fill: false
-      }]
-    },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{font:{size:11}}}}, scales:{y:{ticks:{font:{size:11}},grid:{color:'#f3f4f6'}},x:{ticks:{font:{size:10}},grid:{display:false}}} }
-  })
+  // ── Render tab bar ───────────────────────────────────────────────────
+  function renderTabBar() {
+    const bar = document.getElementById('chart-range-tabs')
+    if (!bar) return
+    let html = '<div class="chart-tabs-group">'
+    quickGroup.forEach(t => {
+      html += \`<button class="chart-tab\${state.chartRange===t.id?' active':''}" data-range="\${t.id}">\${t.label}</button>\`
+    })
+    html += '</div>'
+    yearGroups.forEach(g => {
+      html += \`<div class="chart-tabs-group"><span class="chart-tabs-group-label">\${g.year}</span>\`
+      g.tabs.forEach(t => {
+        html += \`<button class="chart-tab\${state.chartRange===t.id?' active':''}" data-range="\${t.id}">\${t.label}</button>\`
+      })
+      html += '</div>'
+    })
+    bar.innerHTML = html
+    bar.addEventListener('click', e => {
+      const btn = e.target.closest('.chart-tab')
+      if (!btn) return
+      state.chartRange = btn.dataset.range
+      buildCharts()
+    })
+  }
+  renderTabBar()
 
-  // Bar chart
-  new Chart(document.getElementById('chart-bar'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Net Revenue', data: nrs, backgroundColor: 'rgba(79,110,247,.75)', borderRadius: 4 },
-        { label: 'Gross Profit', data: gps, backgroundColor: 'rgba(34,197,94,.65)', borderRadius: 4 }
+  // ── Filter weeks by range ────────────────────────────────────────────
+  function filterWeeks(rangeId) {
+    if (rangeId === 'recent') return allWeeks.slice(-8)
+    const parts = rangeId.split('_')
+    const type = parts[0]
+    const yr   = parts[1]
+    if (type === 'ytd') {
+      const jan1  = \`\${yr}-01-01\`
+      const today = new Date().toISOString().slice(0,10)
+      return allWeeks.filter(w => w.week_start >= jan1 && w.week_start <= today)
+    }
+    if (type === 'year') {
+      return allWeeks.filter(w => w.week_start.startsWith(yr))
+    }
+    if (['q1','q2','q3','q4'].includes(type)) {
+      const { s, e } = getQuarterRange(yr, +type[1])
+      return allWeeks.filter(w => w.week_start >= s && w.week_start <= e)
+    }
+    return allWeeks.slice(-8)
+  }
+
+  // ── Range label for summary heading ─────────────────────────────────
+  function rangeLabel(rangeId) {
+    if (rangeId === 'recent') return 'Last 8 Weeks'
+    const parts = rangeId.split('_')
+    const type = parts[0], yr = parts[1]
+    if (type === 'ytd')  return \`Year-to-Date \${yr}\`
+    if (type === 'year') return \`Full Year \${yr}\`
+    if (['q1','q2','q3','q4'].includes(type)) return \`Q\${type[1]} \${yr}\`
+    return rangeId
+  }
+
+  // ── 3-week moving average ────────────────────────────────────────────
+  function movingAvg(data, n=3) {
+    return data.map((_, i) => {
+      const slice = data.slice(Math.max(0, i-n+1), i+1)
+      return +(slice.reduce((a,b)=>a+b,0)/slice.length).toFixed(2)
+    })
+  }
+
+  // ── Hex → rgba helper ────────────────────────────────────────────────
+  function hexAlpha(hex, a) {
+    const r = parseInt(hex.slice(1,3),16)
+    const g = parseInt(hex.slice(3,5),16)
+    const b = parseInt(hex.slice(5,7),16)
+    return \`rgba(\${r},\${g},\${b},\${a})\`
+  }
+
+  // ── Chart options factory ────────────────────────────────────────────
+  function chartOpts(yFmt='dollar') {
+    const isDollar = yFmt==='dollar', isPct=yFmt==='pct'
+    const isRatio  = yFmt==='ratio',  isHr =yFmt==='hr'
+    const tickCb = isDollar ? v=>'$'+Math.round(v).toLocaleString()
+                 : isPct    ? v=>v.toFixed(1)+'%'
+                 : isRatio  ? v=>v.toFixed(2)+'x'
+                 : isHr     ? v=>'$'+v.toFixed(0)+'/hr'
+                 : v=>v
+    return {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: { display: true, labels:{ font:{size:10}, boxWidth:10, padding:8 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y
+              if (isDollar) return \` \${ctx.dataset.label}: \$\${Math.round(v).toLocaleString()}\`
+              if (isPct)    return \` \${ctx.dataset.label}: \${v.toFixed(1)}%\`
+              if (isRatio)  return \` \${ctx.dataset.label}: \${v.toFixed(2)}x\`
+              if (isHr)     return \` \${ctx.dataset.label}: \$\${v.toFixed(0)}/hr\`
+              return \` \${ctx.dataset.label}: \${v}\`
+            }
+          }
+        }
+      },
+      scales: {
+        y: { ticks:{ callback:tickCb, font:{size:10}, maxTicksLimit:5 }, grid:{color:'#f3f4f6'} },
+        x: { ticks:{ font:{size:9}, maxRotation:45, autoSkip:true, maxTicksLimit:10 }, grid:{display:false} }
+      }
+    }
+  }
+
+  // ── Format summary value ─────────────────────────────────────────────
+  function fmtStat(v, fmt) {
+    if (fmt==='dollar') return '\$'+Math.round(v).toLocaleString()
+    if (fmt==='pct')    return v.toFixed(1)+'%'
+    if (fmt==='ratio')  return v.toFixed(2)+'x'
+    if (fmt==='hr')     return '\$'+v.toFixed(0)+'/hr'
+    return v
+  }
+
+  // ── Metric definitions ───────────────────────────────────────────────
+  const metrics = [
+    { id:'nr',     label:'Net Revenue',        color:'#4f6ef7', fmt:'dollar', extract: k=>k.nr,
+      icon:'fa-dollar-sign', desc:'Rev − Mats − Subs' },
+    { id:'ratio',  label:'NR / Direct Labor',  color:'#8b5cf6', fmt:'ratio',  extract: k=>k.nrLaborRatio,
+      target: ()=>+s.nr_labor_target, targetLabel:'Target',
+      icon:'fa-balance-scale', desc:'Primary efficiency KPI' },
+    { id:'gp',     label:'Gross Profit $',     color:'#22c55e', fmt:'dollar', extract: k=>k.gp,
+      icon:'fa-chart-bar', desc:'NR − Direct Labor Cost' },
+    { id:'gpPct',  label:'GP %',               color:'#10b981', fmt:'pct',    extract: k=>k.gpPct,
+      target: ()=>+s.gp_pct_target, targetLabel:'Target %',
+      icon:'fa-percent', desc:'GP ÷ NR' },
+    { id:'oh',     label:'Weekly Overhead',    color:'#f59e0b', fmt:'dollar', extract: k=>k.oh,
+      icon:'fa-building', desc:'Fixed OH + Indirect Labor' },
+    { id:'np',     label:'Net Profit',         color:'#06b6d4', fmt:'dollar', extract: k=>k.np,
+      icon:'fa-coins', desc:'NR − DL − Overhead' },
+    { id:'nrhr',   label:'NR / Direct Hour',   color:'#ec4899', fmt:'hr',     extract: k=>k.nrPerHour,
+      icon:'fa-clock', desc:'Revenue per billable hour' },
+    { id:'dlcost', label:'Direct Labor Cost',  color:'#f97316', fmt:'dollar', extract: k=>k.dlCost,
+      icon:'fa-users', desc:'Wages + Burden + Benefits' },
+  ]
+
+  // ── Track active Chart.js instances ─────────────────────────────────
+  let activeCharts = []
+
+  // ── Build YTD/range summary strip ───────────────────────────────────
+  function buildSummaryStrip(rangeWeeks) {
+    const strip = document.getElementById('ytd-summary-strip')
+    if (!strip) return
+    if (rangeWeeks.length === 0) { strip.innerHTML = ''; return }
+
+    // Aggregate totals for the range
+    let totNR=0, totGP=0, totNP=0, totDLCost=0, totOH=0, totDLH=0, ratioVals=[], gpPctVals=[]
+    rangeWeeks.forEach(w => {
+      const k = calcKPIs(w, 0)
+      totNR     += k.nr
+      totGP     += k.gp
+      totNP     += k.np
+      totDLCost += k.dlCost
+      totOH     += k.oh
+      totDLH    += k.dlh
+      if (k.nrLaborRatio > 0) ratioVals.push(k.nrLaborRatio)
+      if (k.gpPct > 0)        gpPctVals.push(k.gpPct)
+    })
+    const avgRatio = ratioVals.length ? ratioVals.reduce((a,b)=>a+b,0)/ratioVals.length : 0
+    const avgGpPct = gpPctVals.length ? gpPctVals.reduce((a,b)=>a+b,0)/gpPctVals.length : 0
+    const nrPerHr  = totDLH > 0 ? totNR / totDLH : 0
+    const n = rangeWeeks.length
+
+    const cards = [
+      { label:'Net Revenue',       val:'\$'+Math.round(totNR).toLocaleString(),     sub:\`\${n} wks · avg \$\${Math.round(totNR/n).toLocaleString()}\` },
+      { label:'Gross Profit',      val:'\$'+Math.round(totGP).toLocaleString(),     sub:\`Avg GP% \${avgGpPct.toFixed(1)}%\` },
+      { label:'Net Profit',        val:'\$'+Math.round(totNP).toLocaleString(),     sub:\`\${((totNP/Math.max(totNR,1))*100).toFixed(1)}% NP%\` },
+      { label:'Avg NR/DL Ratio',   val:avgRatio.toFixed(2)+'x',                    sub:\`Target \${(+s.nr_labor_target).toFixed(2)}x\` },
+      { label:'Avg GP %',          val:avgGpPct.toFixed(1)+'%',                    sub:\`Target \${(+s.gp_pct_target).toFixed(1)}%\` },
+      { label:'NR / Direct Hour',  val:'\$'+nrPerHr.toFixed(0)+'/hr',              sub:\`\${Math.round(totDLH)} total DL hrs\` },
+    ]
+    strip.innerHTML = \`
+      <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">
+        <i class="fas fa-layer-group" style="margin-right:5px;"></i>\${rangeLabel(state.chartRange)} Summary
+      </div>
+      <div class="ytd-strip">\${cards.map(c=>\`
+        <div class="ytd-card">
+          <div class="ytd-label">\${c.label}</div>
+          <div class="ytd-val">\${c.val}</div>
+          <div class="ytd-sub">\${c.sub}</div>
+        </div>\`).join('')}
+      </div>
+    \`
+  }
+
+  // ── Main buildCharts function ────────────────────────────────────────
+  function buildCharts() {
+    // Sync tab highlights
+    document.querySelectorAll('.chart-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.range === state.chartRange))
+
+    const rangeWeeks = filterWeeks(state.chartRange)
+    const labels = rangeWeeks.map(w => formatWeekLabel(w.week_start))
+    const ptR = rangeWeeks.length > 20 ? 2 : (rangeWeeks.length > 10 ? 3 : 4)
+
+    // Destroy old charts
+    activeCharts.forEach(c => c.destroy())
+    activeCharts = []
+
+    // Build summary strip
+    buildSummaryStrip(rangeWeeks)
+
+    // Build chart cards
+    const container = document.getElementById('charts-container')
+    if (!container) return
+
+    if (rangeWeeks.length === 0) {
+      container.innerHTML = \`<div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--gray-400);font-size:13px;"><i class="fas fa-inbox" style="font-size:28px;display:block;margin-bottom:8px;"></i>No data for this range</div>\`
+      return
+    }
+
+    container.innerHTML = metrics.map(m =>
+      \`<div class="chart-card">
+        <div class="chart-card-header">
+          <div class="chart-card-title">
+            <i class="fas \${m.icon}" style="color:\${m.color};"></i>\${m.label}
+          </div>
+          <div class="chart-card-stat" id="chart-stat-\${m.id}"></div>
+        </div>
+        <div class="chart-card-body">
+          <canvas id="chart-\${m.id}"></canvas>
+        </div>
+      </div>\`
+    ).join('')
+
+    metrics.forEach(m => {
+      // Compute per-week values — use actual OH for the OH metric
+      const values = rangeWeeks.map(w => {
+        const k = calcKPIs(w, 0)
+        const raw = m.extract(k)
+        return isNaN(raw) ? 0 : +raw.toFixed(2)
+      })
+
+      // Summary stat shown in card header (latest value)
+      const latest = values[values.length - 1] ?? 0
+      const statEl = document.getElementById('chart-stat-'+m.id)
+      if (statEl) statEl.textContent = fmtStat(latest, m.fmt)
+
+      const ma = movingAvg(values, 3)
+
+      const datasets = [
+        {
+          label: m.label,
+          data: values,
+          borderColor: m.color,
+          backgroundColor: hexAlpha(m.color, 0.08),
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: m.color,
+          pointRadius: ptR,
+          pointHoverRadius: ptR + 2,
+          borderWidth: 2
+        },
+        {
+          label: '3-Wk Avg',
+          data: ma,
+          borderColor: '#94a3b8',
+          borderDash: [4,3],
+          pointRadius: 0,
+          fill: false,
+          tension: 0.35,
+          borderWidth: 1.5
+        }
       ]
-    },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{font:{size:11}}}}, scales:{y:{ticks:{callback:v=>'\$'+v.toLocaleString(),font:{size:11}},grid:{color:'#f3f4f6'}},x:{ticks:{font:{size:10}},grid:{display:false}}} }
-  })
+
+      // Target line
+      if (m.target) {
+        const tv = m.target()
+        if (tv) {
+          datasets.push({
+            label: m.targetLabel || 'Target',
+            data: rangeWeeks.map(() => tv),
+            borderColor: '#22c55e',
+            borderDash: [5,4],
+            pointRadius: 0,
+            fill: false,
+            borderWidth: 1.5
+          })
+        }
+      }
+
+      const c = new Chart(document.getElementById('chart-'+m.id), {
+        type: 'line',
+        data: { labels, datasets },
+        options: chartOpts(m.fmt)
+      })
+      activeCharts.push(c)
+    })
+  }
+
+  buildCharts()
 }
 
 function formatWeekLabel(weekStart) {
