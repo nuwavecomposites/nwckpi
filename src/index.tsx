@@ -633,10 +633,8 @@ async function renderDashboard() {
     return +k.nrLaborRatio.toFixed(2)
   })
   const nrs = chartWeeks.map(w => {
-    const m  = +w.materials || 0
-    const sb = +w.subcontractors || 0
-    const lg = +w.cogs || 0  // legacy fallback
-    return +((+w.gross_revenue) - ((m + sb) > 0 ? (m + sb) : lg)).toFixed(2)
+    const k = calcKPIs(w, 0)
+    return +k.nr.toFixed(2)
   })
   const gps = chartWeeks.map(w => {
     const k = calcKPIs(w, 0)
