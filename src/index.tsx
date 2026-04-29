@@ -524,7 +524,7 @@ async function renderDashboard() {
   const selected = weeks.find(w=>w.id===state.selectedWeekId)
   const month = getWeekMonth(selected.week_start)
   const ohSummary = await api('/overhead/summary/' + month)
-  const weeklyOH = ohSummary.grand_total / 4.33
+  const weeklyOH = ohSummary.fixed_total / 4.33
 
   const kpi = calcKPIs(selected, weeklyOH)
   const s = settings
@@ -600,7 +600,7 @@ async function renderDashboard() {
       <div class="kpi-card neutral">
         <div class="kpi-label">Direct Labor Cost</div>
         <div class="kpi-value">\${fmt(kpi.dlCost)}</div>
-        <div class="kpi-sub">Wages \${fmt(kpi.dlw)} + Burden \${fmt(kpi.dlBurden)} + Benefits \${fmt(kpi.bens)}</div>
+        <div class="kpi-sub">Wages \${fmt(kpi.dlw)} + Burden \${fmt(kpi.dlBurden)} + Benefits \${fmt(kpi.benefits)}</div>
       </div>
 
     </div>
@@ -1164,13 +1164,14 @@ async function renderHistory() {
     const kpi = calcKPIs(w, 0)
     const ratioColor = kpiColor(kpi.nrLaborRatio, settings.nr_labor_target, true)
     const gpColor = kpiColor(kpi.gpPct, settings.gp_pct_target, true)
+    const npColor = kpi.np >= 0 ? 'green' : 'red'
     return \`<tr>
       <td style="font-weight:600;">\${w.week_start}</td>
       <td>\${fmt(w.gross_revenue)}</td>
       <td>\${fmt(kpi.nr)}</td>
-      <td>\${fmt(kpi.gp)}</td>
       <td><span class="badge badge-\${gpColor}">\${fmt(kpi.gp)} <span style="font-weight:400;opacity:.7;">\${fmtPct(kpi.gpPct)}</span></span></td>
       <td><span class="badge badge-\${ratioColor}">\${fmtX(kpi.nrLaborRatio)}</span></td>
+      <td><span class="badge badge-\${npColor}">\${fmt(kpi.np)}</span></td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="\${w.notes||''}">\${w.notes||'—'}</td>
       <td>
         <div class="td-actions">
@@ -1194,7 +1195,7 @@ async function renderHistory() {
         <table>
           <thead>
             <tr>
-              <th>Week Start</th><th>Gross Rev</th><th>Net Rev</th><th>Gross Profit $</th><th>GP%</th><th>NR/DL Ratio</th><th>Notes</th><th></th>
+              <th>Week Start</th><th>Gross Rev</th><th>Net Rev</th><th>Gross Profit / GP%</th><th>NR/DL</th><th>Net Profit</th><th>Notes</th><th></th>
             </tr>
           </thead>
           <tbody>\${rows}</tbody>
