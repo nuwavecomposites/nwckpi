@@ -20,9 +20,11 @@ INSERT OR IGNORE INTO settings (id) VALUES (1);
 CREATE TABLE IF NOT EXISTS weekly_entries (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   week_start DATE NOT NULL UNIQUE,
-  notes TEXT,
+  notes TEXT DEFAULT '',
   gross_revenue REAL NOT NULL DEFAULT 0,
-  cogs REAL NOT NULL DEFAULT 0,
+  cogs REAL NOT NULL DEFAULT 0,           -- kept for legacy; use materials+subcontractors
+  materials REAL NOT NULL DEFAULT 0,
+  subcontractors REAL NOT NULL DEFAULT 0,
   direct_labor_wages REAL NOT NULL DEFAULT 0,
   direct_labor_hours REAL NOT NULL DEFAULT 0,
   indirect_labor_wages REAL NOT NULL DEFAULT 0,
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS overhead_fixed (
   name TEXT NOT NULL,
   amount REAL NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT DEFAULT '',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
