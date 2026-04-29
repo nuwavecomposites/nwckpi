@@ -856,28 +856,28 @@ async function renderDashboard() {
   const metrics = [
     { id:'np',     label:'Net Profit $',       color:'#06b6d4', fmt:'dollar', extract: k=>k.np,
       target: ()=>+s.np_target,     targetLabel:'NP$ Target',
-      icon:'fa-coins', desc:'NR − DL − Overhead' },
+      icon:'fa-coins', formula:'NR − DL − Overhead' },
     { id:'npPct',  label:'Net Profit %',       color:'#0891b2', fmt:'pct',    extract: k=>k.npPct,
       target: ()=>+s.np_pct_target, targetLabel:'NP% Target',
-      icon:'fa-percentage', desc:'NP ÷ NR' },
+      icon:'fa-percentage', formula:'NP ÷ NR' },
     { id:'ratio',  label:'NR / Direct Labor',  color:'#8b5cf6', fmt:'ratio',  extract: k=>k.nrLaborRatio,
       target: ()=>+s.nr_labor_target, targetLabel:'Target',
-      icon:'fa-balance-scale', desc:'Primary efficiency KPI' },
+      icon:'fa-balance-scale', formula:'Primary efficiency KPI' },
     { id:'nr',     label:'Net Revenue',        color:'#4f6ef7', fmt:'dollar', extract: k=>k.nr,
       target: ()=>+s.nr_target,     targetLabel:'NR Target',
-      icon:'fa-dollar-sign', desc:'Rev − Mats − Subs' },
+      icon:'fa-dollar-sign', formula:'Rev − Mats − Subs' },
     { id:'gp',     label:'Gross Profit $',     color:'#22c55e', fmt:'dollar', extract: k=>k.gp,
       target: ()=>+s.gp_target,     targetLabel:'GP$ Target',
-      icon:'fa-chart-bar', desc:'NR − Direct Labor Cost' },
+      icon:'fa-chart-bar', formula:'NR − Direct Labor Cost' },
     { id:'gpPct',  label:'GP %',               color:'#10b981', fmt:'pct',    extract: k=>k.gpPct,
       target: ()=>+s.gp_pct_target, targetLabel:'Target %',
-      icon:'fa-percent', desc:'GP ÷ NR' },
+      icon:'fa-percent', formula:'GP ÷ NR' },
     { id:'oh',     label:'Overhead Spend',     color:'#f59e0b', fmt:'dollar', extract: k=>k.oh,
-      icon:'fa-building', desc:'Fixed OH + Indirect Labor' },
+      icon:'fa-building', formula:'Fixed OH + Indirect Labor' },
     { id:'nrhr',   label:'NR / Direct Hour',   color:'#ec4899', fmt:'hr',     extract: k=>k.nrPerHour,
-      icon:'fa-clock', desc:'Revenue per billable hour' },
+      icon:'fa-clock', formula:'Revenue per billable hour' },
     { id:'dlcost', label:'Direct Labor Cost',  color:'#f97316', fmt:'dollar', extract: k=>k.dlCost,
-      icon:'fa-users', desc:'Wages + Burden + Benefits' },
+      icon:'fa-users', formula:'Wages + Burden + Benefits' },
   ]
 
   // ── Track active Chart.js instances ─────────────────────────────────
@@ -1077,7 +1077,7 @@ async function renderEntry(editEntry=null) {
 
         <hr class="divider" />
         <div class="section-title">Revenue & Direct Costs</div>
-        <div class="section-sub">Net Revenue = Gross Revenue – Materials – Subcontractors</div>
+        <div class="section-sub">Net Revenue = Gross Revenue – Materials</div>
         <div class="form-grid" style="margin-top:12px;">
           <div class="form-group">
             <label>Gross Revenue</label>
@@ -1086,10 +1086,6 @@ async function renderEntry(editEntry=null) {
           <div class="form-group">
             <label>Materials</label>
             <div class="input-prefix"><span>$</span><input type="number" id="f-mats" step="0.01" min="0" value="\${e.materials||''}" placeholder="0.00" oninput="updatePreview()" /></div>
-          </div>
-          <div class="form-group">
-            <label>Subcontractors</label>
-            <div class="input-prefix"><span>$</span><input type="number" id="f-subs" step="0.01" min="0" value="\${e.subcontractors||''}" placeholder="0.00" oninput="updatePreview()" /></div>
           </div>
         </div>
 
@@ -1207,7 +1203,7 @@ function updatePreview() {
   const entry = {
     gross_revenue:        +document.getElementById('f-gross-rev')?.value || 0,
     materials:            +document.getElementById('f-mats')?.value      || 0,
-    subcontractors:       +document.getElementById('f-subs')?.value      || 0,
+    subcontractors:          0,
     direct_labor_wages:   dlw,
     direct_labor_hours:   +document.getElementById('f-dl-hours')?.value  || 0,
     indirect_labor_wages: ilw,
@@ -1242,7 +1238,7 @@ async function saveEntry() {
     notes:                document.getElementById('f-notes').value,
     gross_revenue:        +document.getElementById('f-gross-rev').value || 0,
     materials:            +document.getElementById('f-mats').value      || 0,
-    subcontractors:       +document.getElementById('f-subs').value      || 0,
+    subcontractors:          0,
     direct_labor_wages:   +document.getElementById('f-dl-wages').value  || 0,
     direct_labor_hours:   +document.getElementById('f-dl-hours').value  || 0,
     indirect_labor_wages: +document.getElementById('f-il-wages').value  || 0,
