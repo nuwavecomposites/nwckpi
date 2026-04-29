@@ -612,7 +612,7 @@ async function renderDashboard() {
       <div class="kpi-card neutral">
         <div class="kpi-label">1 · Net Revenue</div>
         <div class="kpi-value">\${fmt(kpi.nr)}</div>
-        <div class="kpi-sub">Revenue \${fmt(kpi.gr)} − Mats \${fmt(kpi.mats)} − Subs \${fmt(kpi.subs)}</div>
+        <div class="kpi-sub">Revenue \${fmt(kpi.gr)} − Materials \${fmt(kpi.mats)}</div>
       </div>
 
       <!-- 2. NR / Direct Labor (fully burdened) -->
@@ -865,7 +865,7 @@ async function renderDashboard() {
       icon:'fa-balance-scale', formula:'Primary efficiency KPI' },
     { id:'nr',     label:'Net Revenue',        color:'#4f6ef7', fmt:'dollar', extract: k=>k.nr,
       target: ()=>+s.nr_target,     targetLabel:'NR Target',
-      icon:'fa-dollar-sign', formula:'Rev − Mats − Subs' },
+      icon:'fa-dollar-sign', formula:'Revenue − Materials' },
     { id:'gp',     label:'Gross Profit $',     color:'#22c55e', fmt:'dollar', extract: k=>k.gp,
       target: ()=>+s.gp_target,     targetLabel:'GP$ Target',
       icon:'fa-chart-bar', formula:'NR − Direct Labor Cost' },
