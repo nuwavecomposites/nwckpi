@@ -890,7 +890,7 @@ async function renderDashboard() {
     if (rangeWeeks.length === 0) { strip.innerHTML = ''; return }
 
     // Aggregate totals for the range
-    let totNR=0, totGP=0, totNP=0, totDLCost=0, totOH=0, totDLH=0, ratioVals=[], gpPctVals=[]
+    let totNR=0, totGP=0, totNP=0, totDLCost=0, totOH=0, totDLH=0, ratioVals=[], gpPctVals=[], npPctVals=[]
     rangeWeeks.forEach(w => {
       const k = calcKPIs(w, 0)
       totNR     += k.nr
@@ -901,19 +901,24 @@ async function renderDashboard() {
       totDLH    += k.dlh
       if (k.nrLaborRatio > 0) ratioVals.push(k.nrLaborRatio)
       if (k.gpPct > 0)        gpPctVals.push(k.gpPct)
+      if (k.npPct > 0)        npPctVals.push(k.npPct)
     })
     const avgRatio = ratioVals.length ? ratioVals.reduce((a,b)=>a+b,0)/ratioVals.length : 0
     const avgGpPct = gpPctVals.length ? gpPctVals.reduce((a,b)=>a+b,0)/gpPctVals.length : 0
+    const avgNpPct = npPctVals.length ? npPctVals.reduce((a,b)=>a+b,0)/npPctVals.length : 0
     const nrPerHr  = totDLH > 0 ? totNR / totDLH : 0
     const n = rangeWeeks.length
 
     const cards = [
+      { label:'Net Profit $',      val:'\$'+Math.round(totNP).toLocaleString(),     sub:\`avg \$\${Math.round(totNP/n).toLocaleString()} · \${avgNpPct.toFixed(1)}% NP%\` },
+      { label:'Net Profit %',      val:avgNpPct.toFixed(1)+'%',                    sub:\`avg over \${n} wks\` },
+      { label:'NR / Direct Labor', val:avgRatio.toFixed(2)+'x',                    sub:\`Target \${(+s.nr_labor_target).toFixed(2)}x\` },
       { label:'Net Revenue',       val:'\$'+Math.round(totNR).toLocaleString(),     sub:\`\${n} wks · avg \$\${Math.round(totNR/n).toLocaleString()}\` },
-      { label:'Gross Profit',      val:'\$'+Math.round(totGP).toLocaleString(),     sub:\`Avg GP% \${avgGpPct.toFixed(1)}%\` },
-      { label:'Net Profit',        val:'\$'+Math.round(totNP).toLocaleString(),     sub:\`avg \$\${Math.round(totNP/n).toLocaleString()} · \${((totNP/Math.max(totNR,1))*100).toFixed(1)}% NP%\` },
-      { label:'Avg NR/DL Ratio',   val:avgRatio.toFixed(2)+'x',                    sub:\`Target \${(+s.nr_labor_target).toFixed(2)}x\` },
-      { label:'Avg GP %',          val:avgGpPct.toFixed(1)+'%',                    sub:\`Target \${(+s.gp_pct_target).toFixed(1)}%\` },
+      { label:'Gross Profit $',    val:'\$'+Math.round(totGP).toLocaleString(),     sub:\`avg \$\${Math.round(totGP/n).toLocaleString()} · \${avgGpPct.toFixed(1)}% GP%\` },
+      { label:'GP %',              val:avgGpPct.toFixed(1)+'%',                    sub:\`Target \${(+s.gp_pct_target).toFixed(1)}%\` },
+      { label:'Overhead Spend',    val:'\$'+Math.round(totOH).toLocaleString(),     sub:\`avg \$\${Math.round(totOH/n).toLocaleString()}/wk\` },
       { label:'NR / Direct Hour',  val:'\$'+nrPerHr.toFixed(0)+'/hr',              sub:\`\${Math.round(totDLH)} total DL hrs\` },
+      { label:'Direct Labor Cost', val:'\$'+Math.round(totDLCost).toLocaleString(), sub:\`avg \$\${Math.round(totDLCost/n).toLocaleString()}/wk\` },
     ]
     strip.innerHTML = \`
       <div style="font-size:11px;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">
