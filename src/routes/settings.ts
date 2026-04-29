@@ -19,6 +19,10 @@ settings.put('/', async (c) => {
       other_burden_pct = ?,
       nr_labor_target = ?,
       gp_pct_target = ?,
+      np_target = ?,
+      np_pct_target = ?,
+      gp_target = ?,
+      nr_target = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = 1
   `).bind(
@@ -28,7 +32,11 @@ settings.put('/', async (c) => {
     body.fl_reemployment_pct,
     body.other_burden_pct,
     body.nr_labor_target,
-    body.gp_pct_target
+    body.gp_pct_target,
+    body.np_target,
+    body.np_pct_target,
+    body.gp_target,
+    body.nr_target
   ).run()
   const row = await c.env.DB.prepare('SELECT * FROM settings WHERE id = 1').first()
   return c.json(row)

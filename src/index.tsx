@@ -855,15 +855,19 @@ async function renderDashboard() {
   // ── Metric definitions ───────────────────────────────────────────────
   const metrics = [
     { id:'np',     label:'Net Profit $',       color:'#06b6d4', fmt:'dollar', extract: k=>k.np,
+      target: ()=>+s.np_target,     targetLabel:'NP$ Target',
       icon:'fa-coins', desc:'NR − DL − Overhead' },
     { id:'npPct',  label:'Net Profit %',       color:'#0891b2', fmt:'pct',    extract: k=>k.npPct,
+      target: ()=>+s.np_pct_target, targetLabel:'NP% Target',
       icon:'fa-percentage', desc:'NP ÷ NR' },
     { id:'ratio',  label:'NR / Direct Labor',  color:'#8b5cf6', fmt:'ratio',  extract: k=>k.nrLaborRatio,
       target: ()=>+s.nr_labor_target, targetLabel:'Target',
       icon:'fa-balance-scale', desc:'Primary efficiency KPI' },
     { id:'nr',     label:'Net Revenue',        color:'#4f6ef7', fmt:'dollar', extract: k=>k.nr,
+      target: ()=>+s.nr_target,     targetLabel:'NR Target',
       icon:'fa-dollar-sign', desc:'Rev − Mats − Subs' },
     { id:'gp',     label:'Gross Profit $',     color:'#22c55e', fmt:'dollar', extract: k=>k.gp,
+      target: ()=>+s.gp_target,     targetLabel:'GP$ Target',
       icon:'fa-chart-bar', desc:'NR − Direct Labor Cost' },
     { id:'gpPct',  label:'GP %',               color:'#10b981', fmt:'pct',    extract: k=>k.gpPct,
       target: ()=>+s.gp_pct_target, targetLabel:'Target %',
@@ -1636,8 +1640,10 @@ async function renderSettings() {
 
         <div class="settings-section">
           <div class="settings-section-title">KPI Targets</div>
-          <div class="section-sub" style="margin-bottom:14px;">Used for color-coding KPI cards (green/yellow/red).</div>
-          <div class="settings-grid">
+          <div class="section-sub" style="margin-bottom:14px;">Used for color-coding KPI cards and target lines on charts. Set to 0 to disable a target line.</div>
+
+          <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Ratio &amp; Percentage Targets</div>
+          <div class="settings-grid" style="margin-bottom:20px;">
             <div class="form-group">
               <label>NR / Labor Cost Target</label>
               <div class="input-suffix"><span>x</span><input type="number" id="s-nrl" step="0.1" min="0" value="\${s.nr_labor_target}" /></div>
@@ -1647,6 +1653,30 @@ async function renderSettings() {
               <label>Gross Profit % Target</label>
               <div class="input-suffix"><span>%</span><input type="number" id="s-gp" step="0.1" min="0" max="100" value="\${s.gp_pct_target}" /></div>
               <span style="font-size:11px;color:var(--gray-400);">Default: 40%</span>
+            </div>
+            <div class="form-group">
+              <label>Net Profit % Target</label>
+              <div class="input-suffix"><span>%</span><input type="number" id="s-nppct" step="0.1" min="0" max="100" value="\${s.np_pct_target||0}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">e.g. 15%</span>
+            </div>
+          </div>
+
+          <div style="font-size:11px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Weekly Dollar Targets</div>
+          <div class="settings-grid">
+            <div class="form-group">
+              <label>Net Revenue Target (weekly)</label>
+              <div class="input-prefix"><span>\$</span><input type="number" id="s-nr" step="100" min="0" value="\${s.nr_target||0}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">e.g. 75000</span>
+            </div>
+            <div class="form-group">
+              <label>Gross Profit $ Target (weekly)</label>
+              <div class="input-prefix"><span>\$</span><input type="number" id="s-gpdollar" step="100" min="0" value="\${s.gp_target||0}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">e.g. 30000</span>
+            </div>
+            <div class="form-group">
+              <label>Net Profit $ Target (weekly)</label>
+              <div class="input-prefix"><span>\$</span><input type="number" id="s-np" step="100" min="0" value="\${s.np_target||0}" /></div>
+              <span style="font-size:11px;color:var(--gray-400);">e.g. 10000</span>
             </div>
           </div>
         </div>
@@ -1681,7 +1711,11 @@ async function saveSettings() {
     fl_reemployment_pct: +document.getElementById('s-fl').value || 0,
     other_burden_pct: +document.getElementById('s-ob').value || 0,
     nr_labor_target: +document.getElementById('s-nrl').value || 2.0,
-    gp_pct_target: +document.getElementById('s-gp').value || 40.0
+    gp_pct_target: +document.getElementById('s-gp').value || 40.0,
+    np_target:     +document.getElementById('s-np').value     || 0,
+    np_pct_target: +document.getElementById('s-nppct').value  || 0,
+    gp_target:     +document.getElementById('s-gpdollar').value || 0,
+    nr_target:     +document.getElementById('s-nr').value     || 0
   }
   try {
     state.settings = await api('/settings', { method:'PUT', body: JSON.stringify(body) })
