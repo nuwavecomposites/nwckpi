@@ -396,7 +396,8 @@ const state = {
   selectedWeekId: null,
   overheadFixed: [],
   overheadOnetime: [],
-  currentMonth: new Date().toISOString().slice(0,7)
+  currentMonth: new Date().toISOString().slice(0,7),
+  weeklyOH: 0
 }
 
 // =====================================================================
@@ -480,7 +481,9 @@ function calcKPIs(entry, fixedOHTotal) {
   const ilCost = ilw + ilBurden
 
   // Weekly Overhead = Indirect Labor Cost + Fixed Overhead
-  const fixedOH = fixedOHTotal || 0
+  // Use per-entry snapshot if set (locked at entry time), else use passed-in live total
+  const snapshot = +entry.fixed_overhead_snapshot || 0
+  const fixedOH = snapshot > 0 ? snapshot : (fixedOHTotal || 0)
   const oh = ilCost + fixedOH
 
   // Net Profit = NR – DL Cost – Overhead
@@ -590,6 +593,7 @@ async function renderDashboard() {
   const month = getWeekMonth(selected.week_start)
   const ohSummary = await api('/overhead/summary/' + month)
   const weeklyOH = ohSummary.fixed_total / 4.33
+  state.weeklyOH = weeklyOH
 
   const kpi = calcKPIs(selected, weeklyOH)
   const s = settings
@@ -892,7 +896,7 @@ async function renderDashboard() {
     // Aggregate totals for the range
     let totNR=0, totGP=0, totNP=0, totDLCost=0, totOH=0, totDLH=0, ratioVals=[], gpPctVals=[], npPctVals=[]
     rangeWeeks.forEach(w => {
-      const k = calcKPIs(w, 0)
+      const k = calcKPIs(w, state.weeklyOH)
       totNR     += k.nr
       totGP     += k.gp
       totNP     += k.np
@@ -977,7 +981,7 @@ async function renderDashboard() {
     metrics.forEach(m => {
       // Compute per-week values — use actual OH for the OH metric
       const values = rangeWeeks.map(w => {
-        const k = calcKPIs(w, 0)
+        const k = calcKPIs(w, state.weeklyOH)
         const raw = m.extract(k)
         return isNaN(raw) ? 0 : +raw.toFixed(2)
       })
@@ -1548,7 +1552,7 @@ async function renderHistory() {
   )
 
   const rows = filtered.length ? filtered.map(w => {
-    const kpi = calcKPIs(w, 0)
+    const kpi = calcKPIs(w, state.weeklyOH)
     const ratioColor = kpiColor(kpi.nrLaborRatio, settings.nr_labor_target, true)
     const gpColor = kpiColor(kpi.gpPct, settings.gp_pct_target, true)
     const npColor = kpi.np >= 0 ? 'green' : 'red'
