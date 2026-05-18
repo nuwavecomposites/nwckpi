@@ -797,11 +797,12 @@ async function renderDashboard() {
     return rangeId
   }
 
-  // ── 3-week moving average ────────────────────────────────────────────
-  function movingAvg(data, n=3) {
-    return data.map((_, i) => {
-      const slice = data.slice(Math.max(0, i-n+1), i+1)
-      return +(slice.reduce((a,b)=>a+b,0)/slice.length).toFixed(2)
+  // ── Running average (cumulative mean across selected range) ─────────
+  function runningAvg(data) {
+    let sum = 0
+    return data.map((v, i) => {
+      sum += v
+      return +((sum / (i + 1)).toFixed(2))
     })
   }
 
@@ -991,7 +992,7 @@ async function renderDashboard() {
       const statEl = document.getElementById('chart-stat-'+m.id)
       if (statEl) statEl.textContent = fmtStat(latest, m.fmt)
 
-      const ma = movingAvg(values, 3)
+      const ra = runningAvg(values)
 
       const datasets = [
         {
@@ -1007,14 +1008,14 @@ async function renderDashboard() {
           borderWidth: 2
         },
         {
-          label: '3-Wk Avg',
-          data: ma,
-          borderColor: '#94a3b8',
-          borderDash: [4,3],
+          label: 'Avg',
+          data: ra,
+          borderColor: hexAlpha(m.color, 0.5),
+          borderDash: [5,4],
           pointRadius: 0,
           fill: false,
           tension: 0.35,
-          borderWidth: 1.5
+          borderWidth: 2
         }
       ]
 
